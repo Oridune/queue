@@ -1,4 +1,5 @@
-import { type Redis } from "ioredis";
+// deno-lint-ignore-file no-explicit-any
+import type { Redis } from "ioredis";
 
 export type IRedis = Redis & {
     fetchAndMoveTasks(
