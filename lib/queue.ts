@@ -1,4 +1,5 @@
 // deno-lint-ignore-file no-explicit-any
+/// <reference path="../overrides.d.ts" />
 
 import { Redis, type RedisOptions } from "ioredis";
 import { Throttler } from "./throttler.ts";
