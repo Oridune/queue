@@ -1,0 +1,11 @@
+{
+  "name": "@oridune/queue",
+  "version": "0.0.1",
+  "exports": {
+    ".": "./mod.ts"
+  },
+  "imports": {
+    "ioredis": "npm:ioredis@^5.4.1",
+    "safe-redis-leader": "npm:safe-redis-leader@^0.0.6"
+  }
+}
