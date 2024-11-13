@@ -49,7 +49,7 @@ Queue.subscribe<{
 }>("test", {
     concurrency: 2,
     sort: 1, // 1 ASC, -1 DESC
-    handler: async (event, _topic) => {
+    handler: async (event) => {
         await event.progress(50);
 
         console.log(event.details.data);
