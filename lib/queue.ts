@@ -84,6 +84,11 @@ export interface IQueueInitOptions {
 
 export type TRedisOpts = Redis | RedisOptions | (() => Redis | RedisOptions);
 
+export type TSubscriptionDetails = {
+    unsubscribe: () => any;
+    handlerOpts: IQueueEventHandlerOptions<any>;
+};
+
 const DefaultNamespace = ["OriduneQueue"];
 
 export class Queue {
@@ -103,15 +108,10 @@ export class Queue {
     protected static SlowdownTimes = 10;
     protected static PauseSleepMs = 5000;
     protected static ExpiredTaskMs = 10000;
-    protected static Subscriptions = new Map<
-        string,
-        {
-            unsubscribe: () => any;
-            handlerOpts: IQueueEventHandlerOptions<any>;
-        }
-    >();
+    protected static Subscriptions: Map<string, TSubscriptionDetails> =
+        new Map();
 
-    protected static get redis() {
+    protected static get redis(): Redis {
         if (!this.Ready) throw new Error("Queue is not initialized yet!");
 
         return this.Redis ??= (() => {
@@ -558,7 +558,7 @@ export class Queue {
     protected static resolveKey(
         key?: string | string[],
         namespace?: string | string[],
-    ) {
+    ): string {
         const Namespace = namespace
             ? namespace instanceof Array ? namespace : [namespace]
             : this.Namespace;
@@ -872,16 +872,17 @@ export class Queue {
         this.log(LogType.INFO, () => ["Queue stopped!"]);
     }
 
-    static isPaused = Throttler.throttle(
-        "checkIsPaused",
-        async (topic?: string) => {
-            return await this.redis.getbit(
-                this.resolveKey(topic ? [topic, "isPaused"] : "isPaused"),
-                1,
-            );
-        },
-        5000,
-    );
+    static isPaused: (topic?: string | undefined) => number | Promise<number> =
+        Throttler.throttle(
+            "checkIsPaused",
+            async (topic?: string) => {
+                return await this.redis.getbit(
+                    this.resolveKey(topic ? [topic, "isPaused"] : "isPaused"),
+                    1,
+                );
+            },
+            5000,
+        );
 
     static async pause(topic?: string) {
         await this.redis.setbit(
@@ -980,7 +981,7 @@ export class Queue {
         offset?: number;
         limit?: number;
         sort?: -1 | 1;
-    }) {
+    }): Promise<string[]> {
         const sort = opts?.sort ?? 1;
         const offset = opts?.offset ?? 0;
         const limit = opts?.limit ?? 10000000;
@@ -1010,7 +1011,10 @@ export class Queue {
         return ids;
     }
 
-    static async listTaskProgress(topic: string, taskId: string) {
+    static async listTaskProgress(
+        topic: string,
+        taskId: string,
+    ): Promise<TTaskProgress[]> {
         const progressKey = this.resolveKey([
             topic,
             "data",
@@ -1027,7 +1031,10 @@ export class Queue {
         );
     }
 
-    static async listTaskError(topic: string, taskId: string) {
+    static async listTaskError(
+        topic: string,
+        taskId: string,
+    ): Promise<TTaskError[]> {
         const errorKey = this.resolveKey([
             topic,
             "data",
@@ -1047,7 +1054,10 @@ export class Queue {
     protected static async populateTasks(
         topic: string,
         tasks: Record<string, string>[],
-    ) {
+    ): Promise<(TQueueTaskDetails<string> & {
+        progressTimeline: Array<TTaskProgress>;
+        errorTimeline: Array<TTaskError>;
+    })[]> {
         const resolvedTasks = tasks.map((task) => ({
             ...task,
             data: task.data && JSON.parse(task.data),
@@ -1073,7 +1083,10 @@ export class Queue {
         }));
     }
 
-    protected static redisHashsToTasks(hashs: string[][], ...fields: string[]) {
+    protected static redisHashsToTasks(
+        hashs: string[][],
+        ...fields: string[]
+    ): Record<string, string>[] {
         return hashs.map((hash) => {
             const result: Record<string, string> = {};
 
@@ -1096,7 +1109,10 @@ export class Queue {
         limit?: number;
         sort?: -1 | 1;
         fields?: string[];
-    }) {
+    }): Promise<(TQueueTaskDetails<string> & {
+        progressTimeline: Array<TTaskProgress>;
+        errorTimeline: Array<TTaskError>;
+    })[]> {
         const sort = opts?.sort ?? 1;
         const offset = opts?.offset ?? 0;
         const limit = opts?.limit ?? 10000000;
@@ -1119,7 +1135,12 @@ export class Queue {
         );
     }
 
-    static async listAllTasks(topic: string) {
+    static async listAllTasks(
+        topic: string,
+    ): Promise<(TQueueTaskDetails<string> & {
+        progressTimeline: Array<TTaskProgress>;
+        errorTimeline: Array<TTaskError>;
+    })[]> {
         return (await Promise.all(
             Object.values(QueueTaskStatus).map((status) =>
                 this.listTasks(topic, status)
@@ -1140,7 +1161,7 @@ export class Queue {
         await this.redis.retryAllTasks(this.resolveKey(), topic);
     }
 
-    static async delete(topic: string, ...taskIds: string[]) {
+    static async delete(topic: string, ...taskIds: string[]): Promise<number> {
         const delayedKey = this.resolveKey([
             topic,
             QueueTaskStatus.DELAYED,
@@ -1184,7 +1205,7 @@ export class Queue {
         }))).reduce((_, num) => _ + num, 0);
     }
 
-    static async deleteAll(topic?: string) {
+    static async deleteAll(topic?: string): Promise<number> {
         return await this.redis.deleteKeysWithPattern(
             this.resolveKey(topic ? [topic, "*"] : "*"),
         );
