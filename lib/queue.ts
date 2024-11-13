@@ -1,6 +1,6 @@
 // deno-lint-ignore-file no-explicit-any
-/// <reference path="../overrides.d.ts" />
 
+import type { IRedis } from "./types.ts";
 import { Redis, type RedisOptions } from "ioredis";
 import { Throttler } from "./throttler.ts";
 import { leader } from "./leader.ts";
@@ -111,17 +111,17 @@ export class Queue {
     protected static Subscriptions: Map<string, TSubscriptionDetails> =
         new Map();
 
-    protected static get redis(): Redis {
+    protected static get redis(): IRedis {
         if (!this.Ready) throw new Error("Queue is not initialized yet!");
 
-        return this.Redis ??= (() => {
+        return (this.Redis ??= (() => {
             const Opts =
                 (typeof this.RedisOpts === "function"
                     ? this.RedisOpts()
                     : this.RedisOpts) ?? {};
 
             return new Redis(Opts instanceof Redis ? Opts.options : Opts);
-        })();
+        })() as any);
     }
 
     protected static async acquireLock(
