@@ -50,6 +50,7 @@ export type TQueueTaskDetails<T = string> = {
     progress?: string;
     attempt?: string;
     processedOn: string;
+    updatedOn: string;
     retriedOn?: string;
     completedOn?: string;
 };
@@ -950,6 +951,23 @@ export class Queue {
         await tx.exec();
 
         this.log(LogType.INFO, () => ["New task added:", topic, payload, opts]);
+    }
+
+    static async updateTask<T extends TTaskData>(
+        topic: string,
+        payload: IQueueTaskPayload<T>,
+    ) {
+        const { id, ...rest } = payload;
+
+        const dataKey = this.resolveKey([topic, "data", id]);
+
+        await this.redis.hmset(dataKey, {
+            ...rest,
+            data: typeof rest.data === "object" && rest.data !== null
+                ? JSON.stringify(rest.data)
+                : "{}",
+            updatedOn: Date.now(),
+        });
     }
 
     static async subscribe<T extends TTaskData>(
