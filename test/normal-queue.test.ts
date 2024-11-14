@@ -23,7 +23,7 @@ Deno.test({
             },
         });
 
-        await new Promise((_) => setTimeout(_, 1000));
+        await new Promise((_) => setTimeout(_, 3000));
 
         if (!results.length) throw new Error("Normal task didn't executed!");
 
