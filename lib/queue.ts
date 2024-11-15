@@ -66,7 +66,7 @@ export interface IQueueEvent<T extends TTaskData> {
 }
 
 export interface IQueueEventHandlerOptions<T extends TTaskData> {
-    concurrency?: number;
+    concurrency?: number | (() => number | Promise<number>);
     sort?: -1 | 1;
     handler: (event: IQueueEvent<T>) => void | Promise<void>;
     readonly shared?: boolean;
@@ -633,9 +633,12 @@ export class Queue {
         // Crash recovery
         await this.recover(topic);
 
-        const concurrency = typeof handlerOpts.concurrency === "number"
-            ? handlerOpts.concurrency
-            : 1;
+        const concurrency =
+            (typeof handlerOpts.concurrency === "function"
+                ? await handlerOpts.concurrency()
+                : typeof handlerOpts.concurrency === "number"
+                ? handlerOpts.concurrency
+                : 1) || 1;
 
         const movedTaskIds = await this.redis.fetchAndMoveTasks(
             this.resolveKey([topic, QueueTaskStatus.DELAYED]),
