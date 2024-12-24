@@ -3,7 +3,7 @@
 import type { IRedis } from "./types.ts";
 import { Redis, type RedisOptions } from "ioredis";
 import { Throttler } from "./throttler.ts";
-import { leader, LeaderOpts } from "./leader.ts";
+import { leader, type LeaderOpts } from "./leader.ts";
 
 export enum LogType {
   INFO = "info",
