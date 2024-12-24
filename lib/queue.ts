@@ -3,7 +3,7 @@
 import type { IRedis } from "./types.ts";
 import { Redis, type RedisOptions } from "ioredis";
 import { Throttler } from "./throttler.ts";
-import { leader } from "./leader.ts";
+import { leader, LeaderOpts } from "./leader.ts";
 
 export enum LogType {
   INFO = "info",
@@ -957,10 +957,12 @@ export class Queue {
     key: string | string[],
     onLock: (unlock: () => Promise<void>) => void | Promise<void>,
     onUnlock: () => void | Promise<void>,
+    opts?: LeaderOpts,
   ) {
     const { on, elect, shutdown } = await leader(
       this.redis,
       this.resolveKey(["locks", ...(key instanceof Array ? key : [key])]),
+      opts,
     );
 
     on("elected", () => onLock(shutdown));
