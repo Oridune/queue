@@ -958,7 +958,7 @@ export class Queue {
     onLock: (unlock: () => Promise<void>) => void | Promise<void>,
     onUnlock: () => void | Promise<void>,
     opts?: LeaderOpts,
-  ) {
+  ): Promise<{ release: () => Promise<void> }> {
     const { on, elect, shutdown } = await leader(
       this.redis,
       this.resolveKey(["locks", ...(key instanceof Array ? key : [key])]),
