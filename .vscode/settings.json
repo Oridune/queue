@@ -1,3 +1,25 @@
 {
-    "deno.enable": true
+    "deno.enable": true,
+    "cSpell.words": [
+        "getbit",
+        "Hashs",
+        "HGET",
+        "HGETALL",
+        "hincrby",
+        "HMGET",
+        "hmset",
+        "HSET",
+        "ipairs",
+        "lrange",
+        "Oridune",
+        "RPUSH",
+        "setbit",
+        "WITHSCORES",
+        "zadd",
+        "ZRANGE",
+        "ZRANGEBYSCORE",
+        "ZREM",
+        "ZREVRANGEBYSCORE",
+        "ZSCORE"
+    ]
 }

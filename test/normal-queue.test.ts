@@ -1,32 +1,43 @@
-import { redis } from "../test-connection.ts";
 import { Queue } from "../mod.ts";
 
 Deno.test({
-    name: "Normal task execution",
-    async fn() {
-        Queue.start({ namespace: "testing", redis, logs: true }, true);
+  name: "Normal task execution",
+  async fn(t) {
+    await Queue.start({ namespace: "testing", logs: true });
 
-        await Queue.deleteAll();
+    const topic = "flowTest";
+    const taskId = "normal";
+    const results: number[] = [];
 
-        const topic = "flowTest";
-        const taskId = "normal";
-        const results: number[] = [];
+    await Queue.deleteAll(topic);
 
-        await Queue.enqueue(topic, {
-            id: taskId,
-            data: {},
-        });
+    await t.step("Check empty", async () => {
+      const items = await Queue.listAllTasks(topic);
 
-        await Queue.subscribe(topic, {
-            handler: () => {
-                results.push(1);
-            },
-        });
+      if (items.length) throw new Error("There should be no tasks!");
+    });
 
-        await new Promise((_) => setTimeout(_, 3000));
+    await Queue.enqueue(topic, {
+      id: taskId,
+      data: {},
+    });
 
-        if (!results.length) throw new Error("Normal task didn't executed!");
+    await t.step("Check enqueue", async () => {
+      const items = await Queue.listAllTasks(topic);
 
-        await Queue.stop(true);
-    },
+      if (!items.length) throw new Error("There should be some tasks!");
+    });
+
+    await Queue.subscribe(topic, {
+      handler: () => {
+        results.push(1);
+      },
+    });
+
+    await new Promise((_) => setTimeout(_, 3000));
+
+    if (!results.length) throw new Error("Normal task didn't executed!");
+
+    await Queue.stop(true);
+  },
 });

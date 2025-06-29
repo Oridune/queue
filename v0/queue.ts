@@ -3,7 +3,7 @@
 import type { IRedis } from "./types.ts";
 import { Redis, type RedisOptions } from "ioredis";
 import { Throttler } from "./throttler.ts";
-import { leader, type LeaderOpts } from "./leader.ts";
+import { leader, type LeaderOpts } from "../common/leader.ts";
 
 export enum LogType {
   INFO = "info",
@@ -810,6 +810,7 @@ export class Queue {
       else throw new Error("Queue is already initialized!");
     }
 
+    // Customize options
     if (typeof opts === "object") {
       this.RedisOpts = opts.redis;
       opts.namespace && this.Namespace.push(opts.namespace);
@@ -826,6 +827,7 @@ export class Queue {
 
     this.Ready = true;
 
+    // Register custom redis commands
     this.prepareRedis();
 
     this.tick(async () => {

@@ -14,7 +14,7 @@ export const leader = (redis: Redis, key: string, opts?: LeaderOpts): Promise<{
 }> =>
   createSafeRedisLeader({
     asyncRedis: redis,
-    ttl: opts?.ttl ?? 8000,
-    wait: opts?.wait ?? 10000,
+    ttl: opts?.ttl ?? 6000,
+    wait: opts?.wait ?? 8000,
     key,
   });
