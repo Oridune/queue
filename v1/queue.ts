@@ -115,50 +115,58 @@ export class Queue {
   protected static RedisOpts?: TRedisOpts;
 
   protected static async prepareRedis() {
-    this.redis.defineCommand("processTasks", {
-      numberOfKeys: 3,
-      lua: await Deno.readTextFile("./v1/lua/processTasks.lua"),
-    });
-
-    this.redis.defineCommand("recoverTasks", {
-      numberOfKeys: 2,
-      lua: await Deno.readTextFile("./v1/lua/recoverTasks.lua"),
-    });
-
-    this.redis.defineCommand("updateTaskProgress", {
-      numberOfKeys: 4,
-      lua: await Deno.readTextFile("./v1/lua/updateTaskProgress.lua"),
-    });
-
-    this.redis.defineCommand("updateTaskError", {
-      numberOfKeys: 4,
-      lua: await Deno.readTextFile("./v1/lua/updateTaskError.lua"),
-    });
-
-    this.redis.defineCommand("retryTask", {
-      numberOfKeys: 2,
-      lua: await Deno.readTextFile("./v1/lua/retryTask.lua"),
-    });
-
-    this.redis.defineCommand("retryAllTasks", {
-      numberOfKeys: 2,
-      lua: await Deno.readTextFile("./v1/lua/retryAllTasks.lua"),
-    });
-
-    this.redis.defineCommand("listTasks", {
-      numberOfKeys: 2,
-      lua: await Deno.readTextFile("./v1/lua/listTasks.lua"),
-    });
-
-    this.redis.defineCommand("deleteKeysWithPattern", {
-      numberOfKeys: 1,
-      lua: await Deno.readTextFile("./v1/lua/deleteKeysWithPattern.lua"),
-    });
-
-    this.redis.defineCommand("rateLimitIncr", {
-      numberOfKeys: 3,
-      lua: await Deno.readTextFile("./v1/lua/rateLimitIncr.lua"),
-    });
+    await Promise.all([
+      {
+        name: "processTasks",
+        keys: 3,
+        path: "./lua/processTasks.lua",
+      },
+      {
+        name: "recoverTasks",
+        keys: 2,
+        path: "./lua/recoverTasks.lua",
+      },
+      {
+        name: "updateTaskProgress",
+        keys: 4,
+        path: "./lua/updateTaskProgress.lua",
+      },
+      {
+        name: "updateTaskError",
+        keys: 4,
+        path: "./lua/updateTaskError.lua",
+      },
+      {
+        name: "retryTask",
+        keys: 2,
+        path: "./lua/retryTask.lua",
+      },
+      {
+        name: "retryAllTasks",
+        keys: 2,
+        path: "./lua/retryAllTasks.lua",
+      },
+      {
+        name: "listTasks",
+        keys: 2,
+        path: "./lua/listTasks.lua",
+      },
+      {
+        name: "deleteKeysWithPattern",
+        keys: 1,
+        path: "./lua/deleteKeysWithPattern.lua",
+      },
+      {
+        name: "rateLimitIncr",
+        keys: 3,
+        path: "./lua/rateLimitIncr.lua",
+      },
+    ].map(async (script) =>
+      this.redis.defineCommand(script.name, {
+        numberOfKeys: script.keys,
+        lua: (await import(script.path, { with: { type: "text" } })).default,
+      })
+    ));
   }
 
   public static log(type: LogType, args: () => any[]) {
