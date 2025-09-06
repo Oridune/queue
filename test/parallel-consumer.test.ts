@@ -104,8 +104,8 @@ Deno.test({
     await new Promise((_) => setTimeout(_, 45000));
 
     const [tasks1, tasks2] = await Promise.all([
-      Queue.listTasks(topic1, QueueTaskStatus.WAITING),
-      Queue.listTasks(topic2, QueueTaskStatus.WAITING),
+      Queue.listTasks(topic1, { status: QueueTaskStatus.WAITING }),
+      Queue.listTasks(topic2, { status: QueueTaskStatus.WAITING }),
     ]);
 
     if (tasks1.length || tasks2.length) {
@@ -113,8 +113,8 @@ Deno.test({
     }
 
     const [tasks3, tasks4] = await Promise.all([
-      Queue.listTasks(topic1, QueueTaskStatus.COMPLETED),
-      Queue.listTasks(topic2, QueueTaskStatus.COMPLETED),
+      Queue.listTasks(topic1, { status: QueueTaskStatus.COMPLETED }),
+      Queue.listTasks(topic2, { status: QueueTaskStatus.COMPLETED }),
     ]);
 
     if (tasks3.length !== 3 || tasks4.length !== 10) {

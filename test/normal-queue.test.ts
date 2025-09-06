@@ -12,7 +12,7 @@ Deno.test({
     await Queue.deleteAll(topic);
 
     await t.step("Check empty", async () => {
-      const items = await Queue.listAllTasks(topic);
+      const items = await Queue.listTasks(topic);
 
       if (items.length) throw new Error("There should be no tasks!");
     });
@@ -23,7 +23,7 @@ Deno.test({
     });
 
     await t.step("Check enqueue", async () => {
-      const items = await Queue.listAllTasks(topic);
+      const items = await Queue.listTasks(topic);
 
       if (!items.length) throw new Error("There should be some tasks!");
     });

@@ -1,17 +1,23 @@
 import { redis } from "./test-connection.ts";
 import { Queue } from "./mod.ts";
 
-Queue.start({ namespace: "testing", redis, tickMs: 3000 });
+Queue.start({ namespace: "testing", redis });
 
-setInterval(async () => {
-  await Queue.enqueue("test", {
-    id: "ola",
-    data: {
-      ola: "bola",
-    },
-    priority: 10,
-  });
-}, 3000);
+// for (let i = 0; i < 100; i++) {
+//   await Queue.enqueue("test", {
+//     id: "ola" + i,
+//     data: {
+//       ola: "bola" + i,
+//     },
+//     priority: 10,
+//   });
+// }
+
+const list = await Queue.listTasks("test", {
+  fields: ["id", "data"],
+});
+
+console.log(list);
 
 // await Queue.enqueue("test", {
 //     id: ["foo"],
@@ -44,22 +50,22 @@ setInterval(async () => {
 //     delayMs: 15000,
 // });
 
-Queue.subscribe<{
-  foo: string;
-}>("test", {
-  concurrency: 2,
-  sort: 1, // 1 ASC, -1 DESC
-  handler: async (event) => {
-    await event.progress(50);
+// Queue.subscribe<{
+//   foo: string;
+// }>("test", {
+//   concurrency: 2,
+//   sort: 1, // 1 ASC, -1 DESC
+//   handler: async (event) => {
+//     await event.progress(50);
 
-    console.log(event.details.data);
+//     console.log(event.details.data);
 
-    await new Promise((_) => setTimeout(_, 3000));
+//     await new Promise((_) => setTimeout(_, 3000));
 
-    await event.progress(100);
-  },
-  // shared: true,
-});
+//     await event.progress(100);
+//   },
+//   // shared: true,
+// });
 
 // Queue.stop();
 // redis.end();

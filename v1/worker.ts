@@ -98,7 +98,7 @@ export class QueueWorker<T extends TTaskData> {
 
   protected async process(
     index: number,
-    taskDetails: TQueueTaskDetails<string>,
+    taskDetails: TQueueTaskDetails<unknown>,
   ) {
     await this.withHeartbeat(taskDetails.id, async () => {
       const processingKey = this.queue.resolveKey([
@@ -169,11 +169,21 @@ export class QueueWorker<T extends TTaskData> {
               endTx.zadd(completedKey, 0, taskDetails.id);
               endTx.hset(dataKey, "completedOn", Date.now());
 
+              let data = taskDetails.data as T;
+
+              if (typeof data === "string") {
+                try {
+                  data = JSON.parse(data);
+                } catch {
+                  // Do nothing...
+                }
+              }
+
               // Handle task execution
               const results = await this.handlerOpts.handler({
                 details: {
                   ...taskDetails,
-                  data: JSON.parse(taskDetails.data),
+                  data,
                 },
                 progress,
                 signal,

@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-explicit-any
 import type { Redis } from "ioredis";
 
 export type TSort = 1 | -1;
@@ -33,15 +32,6 @@ export type IRedis = Redis & {
     moveToFailed: 0 | 1,
     priority?: number,
   ): Promise<1>;
-
-  listTasks<T extends Record<string, any>>(
-    sorted_set_key: string,
-    dataKeyPrefix: string,
-    sort_dir: TSort,
-    offset: number,
-    limit: number,
-    ...args: string[]
-  ): Promise<T[]>;
 
   deleteKeysWithPattern(
     pattern: string,

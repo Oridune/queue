@@ -33,7 +33,9 @@ Deno.test({
 
       await new Promise((_) => setTimeout(_, 2000));
 
-      const tasks1 = await Queue.listTaskIds(topic, QueueTaskStatus.WAITING);
+      const tasks1 = await Queue.listTaskIds(topic, {
+        status: QueueTaskStatus.WAITING,
+      });
 
       if (tasks1.length !== 1) {
         throw new Error(
@@ -49,7 +51,9 @@ Deno.test({
 
       await new Promise((_) => setTimeout(_, 7000));
 
-      const tasks2 = await Queue.listTaskIds(topic, QueueTaskStatus.WAITING);
+      const tasks2 = await Queue.listTaskIds(topic, {
+        status: QueueTaskStatus.WAITING,
+      });
 
       if (tasks2.length !== 0) {
         throw new Error(
@@ -87,7 +91,9 @@ Deno.test({
 
       await new Promise((_) => setTimeout(_, 2000));
 
-      const tasks1 = await Queue.listTasks(topic, QueueTaskStatus.WAITING);
+      const tasks1 = await Queue.listTasks(topic, {
+        status: QueueTaskStatus.WAITING,
+      });
 
       if (tasks1.length !== 1) {
         throw new Error(
@@ -103,7 +109,9 @@ Deno.test({
 
       await new Promise((_) => setTimeout(_, 7000));
 
-      const tasks2 = await Queue.listTaskIds(topic, QueueTaskStatus.WAITING);
+      const tasks2 = await Queue.listTaskIds(topic, {
+        status: QueueTaskStatus.WAITING,
+      });
 
       if (tasks2.length !== 1) {
         throw new Error("Did global resume, resumed the topic?");
@@ -113,7 +121,9 @@ Deno.test({
 
       await new Promise((_) => setTimeout(_, 7000));
 
-      const tasks3 = await Queue.listTaskIds(topic, QueueTaskStatus.WAITING);
+      const tasks3 = await Queue.listTaskIds(topic, {
+        status: QueueTaskStatus.WAITING,
+      });
 
       if (tasks3.length !== 0) {
         throw new Error(

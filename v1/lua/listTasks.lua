@@ -1,7 +1,7 @@
 -- Lua script to list tasks with optional field fetching
 --
 -- KEYS:
--- KEYS[1] - sorted_set_key (e.g., "topic:status")
+-- KEYS[1] - sortedSetKey (e.g., "topic:status")
 -- KEYS[2] - dataKeyPrefix (e.g., "topic:data")
 -- ARGV:
 -- ARGV[1] - sort direction (1 for ZRANGEBYSCORE, -1 for ZREVRANGEBYSCORE)
@@ -10,9 +10,9 @@
 -- ARGV[4 ... n] - optional list of fields to fetch from each hash
 --
 -- Declare variables
-local sorted_set_key = KEYS[1]
+local sortedSetKey = KEYS[1]
 local dataKeyPrefix = KEYS[2]
-local sort_dir = tonumber(ARGV[1])
+local sortDir = tonumber(ARGV[1])
 local offset = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
 
@@ -22,17 +22,17 @@ for i = 4, #ARGV do
     table.insert(fields, ARGV[i])
 end
 
--- Validate sort_dir
-if sort_dir ~= 1 and sort_dir ~= -1 then
+-- Validate sortDir
+if sortDir ~= 1 and sortDir ~= -1 then
     error("Invalid sort direction. Use 1 for ascending or -1 for descending.")
 end
 
 -- Retrieve task IDs based on sort direction
 local ids
-if sort_dir > 0 then
-    ids = redis.call('ZRANGEBYSCORE', sorted_set_key, '-inf', '+inf', 'LIMIT', offset, limit)
+if sortDir > 0 then
+    ids = redis.call('ZRANGEBYSCORE', sortedSetKey, '-inf', '+inf', 'LIMIT', offset, limit)
 else
-    ids = redis.call('ZREVRANGEBYSCORE', sorted_set_key, '+inf', '-inf', 'LIMIT', offset, limit)
+    ids = redis.call('ZREVRANGEBYSCORE', sortedSetKey, '+inf', '-inf', 'LIMIT', offset, limit)
 end
 
 -- Initialize the result table

@@ -47,7 +47,7 @@ export interface IQueueTaskPayload<T extends TTaskData> {
   timeoutMs?: number;
 }
 
-export type TQueueTaskDetails<T = string> = {
+export type TQueueTaskDetails<T = TTaskData> = {
   id: string;
   data: T;
   delayMs?: string;
@@ -169,6 +169,11 @@ export class Queue {
     ));
   }
 
+  /**
+   * Custom logging method
+   * @param type Type of log
+   * @param args
+   */
   public static log(type: LogType, args: () => any[]) {
     if (this.enableLogs) {
       const Logger = type === LogType.ERROR
@@ -187,6 +192,9 @@ export class Queue {
     }
   }
 
+  /**
+   * Get redis instance
+   */
   public static get redis(): IRedis {
     if (!this.ready) throw new Error("Queue is not initialized yet!");
 
@@ -200,6 +208,12 @@ export class Queue {
     })() as any);
   }
 
+  /**
+   * Resolves the key parts
+   * @param key
+   * @param namespace
+   * @returns
+   */
   public static resolveKey(
     key?: string | string[],
     namespace?: string | string[],
@@ -215,6 +229,11 @@ export class Queue {
     return [...Namespace, ...Key].join(":");
   }
 
+  /**
+   * Check if a queue or a topic is paused
+   * @param topic
+   * @returns
+   */
   public static async isPaused(topic?: string) {
     const paused = await this.redis.getbit(
       this.resolveKey("isPaused"),
@@ -249,6 +268,11 @@ export class Queue {
     return !!paused;
   }
 
+  /**
+   * Pause the queue or a specific topic
+   * @param topic
+   * @returns
+   */
   public static async pause(topic?: string) {
     await this.redis.setbit(
       this.resolveKey(topic ? [topic, "isPaused"] : "isPaused"),
@@ -265,6 +289,11 @@ export class Queue {
     );
   }
 
+  /**
+   * Resume the queue or a specific topic
+   * @param topic
+   * @returns
+   */
   public static async resume(topic?: string) {
     await this.redis.setbit(
       this.resolveKey(topic ? [topic, "isPaused"] : "isPaused"),
@@ -281,6 +310,11 @@ export class Queue {
     );
   }
 
+  /**
+   * Do something when a queue is paused
+   * @param listener
+   * @param options
+   */
   public static onPause(
     listener: (event: CustomEvent, unRegister: () => void) => any,
     options?: boolean | AddEventListenerOptions,
@@ -294,6 +328,11 @@ export class Queue {
     addEventListener(QueueEvent.PAUSE, handler, options);
   }
 
+  /**
+   * Do something when a queue is resumed
+   * @param listener
+   * @param options
+   */
   public static onResume(
     listener: (event: CustomEvent, unRegister: () => void) => any,
     options?: boolean | AddEventListenerOptions,
@@ -307,6 +346,11 @@ export class Queue {
     addEventListener(QueueEvent.RESUME, handler, options);
   }
 
+  /**
+   * Recover any incomplete/crashed tasks (Changes the task status to Failed)
+   * @param topic
+   * @returns
+   */
   public static async crashRecovery(topic: string) {
     const failedIds = await this.redis.recoverTasks(
       this.resolveKey(topic),
@@ -319,6 +363,13 @@ export class Queue {
     return failedIds;
   }
 
+  /**
+   * Moves the tasks to processing state and returns them
+   * @param topic
+   * @param count
+   * @param sort
+   * @returns
+   */
   public static async getNextTasks(topic: string, count: number, sort: TSort) {
     // Move delayed or waiting tasks to processing list
     const movedTaskIds = await this.redis.processTasks(
@@ -343,6 +394,10 @@ export class Queue {
     ][];
   }
 
+  /**
+   * Initialize/Start a queue
+   * @param opts
+   */
   public static async start(opts?: IQueueInitOptions) {
     if (this.ready) {
       throw new Error("Queue is already initialized!");
@@ -369,7 +424,11 @@ export class Queue {
     this.log(LogType.INFO, () => ["Queue started!"]);
   }
 
-  static async stop(endConnection = false) {
+  /**
+   * Stop/Uninitialize a queue
+   * @param endConnection
+   */
+  public static async stop(endConnection = false) {
     this.log(LogType.WARN, () => ["Attempting to stop the queue!"]);
 
     await Promise.all(
@@ -382,6 +441,7 @@ export class Queue {
 
     if (endConnection) {
       this.redis.disconnect();
+
       this.Redis = undefined;
       this.RedisOpts = undefined;
     }
@@ -391,6 +451,12 @@ export class Queue {
     this.log(LogType.WARN, () => ["Queue forcefully stopped!"]);
   }
 
+  /**
+   * Enqueue a task in the queue
+   * @param topic
+   * @param payload
+   * @param opts
+   */
   public static async enqueue<T extends TTaskData>(
     topic: string,
     payload: IQueueTaskPayload<T>,
@@ -404,7 +470,13 @@ export class Queue {
       throw new Error(`Task ID: ${payload.id} already exists!`);
     }
 
+    const now = Date.now();
+
+    const idsKey = this.resolveKey([topic, "ids"]);
+
     const tx = this.redis.multi();
+
+    tx.zadd(idsKey, now, payload.id);
 
     tx.hmset(dataKey, {
       ...payload,
@@ -412,7 +484,7 @@ export class Queue {
       data: typeof payload.data === "object" && payload.data !== null
         ? JSON.stringify(payload.data)
         : "{}",
-      createdOn: Date.now(),
+      createdOn: now,
     });
 
     if (typeof payload.delayMs === "number" && payload.delayMs >= 1000) {
@@ -423,7 +495,7 @@ export class Queue {
 
       tx.zadd(
         delayedKey,
-        Date.now() + payload.delayMs,
+        now + payload.delayMs,
         payload.id,
       );
     } else {
@@ -444,7 +516,15 @@ export class Queue {
     this.log(LogType.INFO, () => ["New task added:", topic, payload, opts]);
   }
 
-  static async acquireLock(
+  /**
+   * A utility method to acquire a lock on any resource, so that any other executor don't consume it
+   * @param key
+   * @param onLock
+   * @param onUnlock
+   * @param opts
+   * @returns
+   */
+  public static async acquireLock(
     key: string | string[],
     onLock: (unlock: () => Promise<void>) => void | Promise<void>,
     onUnlock: () => void | Promise<void>,
@@ -466,7 +546,14 @@ export class Queue {
     };
   }
 
-  static async subscribe<T extends TTaskData>(
+  /**
+   * Subscribe to a topic to consume the enqueued tasks
+   * @param topic
+   * @param handlerOpts
+   * @param opts
+   * @returns
+   */
+  public static async subscribe<T extends TTaskData>(
     topic: string,
     handlerOpts: IQueueEventHandlerOptions<T>,
     opts?: {
@@ -530,42 +617,94 @@ export class Queue {
     }
   }
 
-  static getSubscription(topic: string) {
+  /**
+   * Get subscription details
+   * @param topic
+   * @returns
+   */
+  public static getSubscription(topic: string) {
     return this.subscriptions.get(topic);
   }
 
-  static async unsubscribe(topic: string) {
+  /**
+   * Unsubscribe from a topic
+   * @param topic
+   */
+  public static async unsubscribe(topic: string) {
     await this.subscriptions.get(topic)?.unsubscribe();
   }
 
-  static incrSlot(topic?: string) {
+  /**
+   * Retry all or specific tasks under a specific topic
+   * @param topic
+   * @param taskId
+   * @param taskIds
+   */
+  public static async retry(
+    topic: string,
+    taskId?: string,
+    ...taskIds: string[]
+  ) {
+    if (taskId) {
+      await this.redis.retryTask(
+        this.resolveKey(),
+        topic,
+        taskId,
+        ...taskIds,
+      );
+    } else {
+      await this.redis.retryAllTasks(this.resolveKey(), topic);
+    }
+  }
+
+  /**
+   * Increment parallel task execution slot
+   *
+   * If you want to execute more tasks per second per subscription you can use this method to increment the execution slot.
+   * @param topic
+   */
+  public static incrSlot(topic?: string) {
     this.redis.publish(
       QueueWorkerEvent.INCR_SLOT + topic,
       "incr",
     );
   }
 
-  static decrSlot(topic?: string) {
+  /**
+   * This method is used to decrement an execution slot
+   *
+   * If a subscriber executes 2 tasks per second you can use this method to reduce it to execute only one task at a time.
+   * @param topic
+   */
+  public static decrSlot(topic?: string) {
     this.redis.publish(
       QueueWorkerEvent.INCR_SLOT + topic,
       "decr",
     );
   }
 
-  static async listTaskIds(topic: string, status: QueueTaskStatus, opts?: {
-    offset?: number;
-    limit?: number;
-    sort?: TSort;
-  }): Promise<string[]> {
+  /**
+   * List all task ids from a specific topic
+   * @param topic
+   * @param opts
+   * @returns
+   */
+  public static async listTaskIds(
+    topic: string,
+    opts?: {
+      status?: QueueTaskStatus;
+      offset?: number;
+      limit?: number;
+      sort?: TSort;
+    },
+  ): Promise<string[]> {
     const sort = opts?.sort ?? 0;
     const offset = opts?.offset ?? 0;
     const limit = opts?.limit ?? 10000000;
 
-    let ids: string[];
-
     if (sort > 0) {
-      ids = await this.redis.zrangebyscore(
-        this.resolveKey([topic, status]),
+      return await this.redis.zrangebyscore(
+        this.resolveKey([topic, opts?.status ?? "ids"]),
         "-inf",
         "+inf",
         "LIMIT",
@@ -573,8 +712,8 @@ export class Queue {
         limit,
       );
     } else {
-      ids = await this.redis.zrevrangebyscore(
-        this.resolveKey([topic, status]),
+      return await this.redis.zrevrangebyscore(
+        this.resolveKey([topic, opts?.status ?? "ids"]),
         "+inf",
         "-inf",
         "LIMIT",
@@ -582,11 +721,15 @@ export class Queue {
         limit,
       );
     }
-
-    return ids;
   }
 
-  static async listTaskProgress(
+  /**
+   * List any in-progress task's current progress timeline
+   * @param topic
+   * @param taskId
+   * @returns
+   */
+  public static async listTaskProgress(
     topic: string,
     taskId: string,
   ): Promise<TTaskProgress[]> {
@@ -606,7 +749,13 @@ export class Queue {
     );
   }
 
-  static async listTaskError(
+  /**
+   * List task's errors
+   * @param topic
+   * @param taskId
+   * @returns
+   */
+  public static async listTaskError(
     topic: string,
     taskId: string,
   ): Promise<TTaskError[]> {
@@ -626,117 +775,119 @@ export class Queue {
     );
   }
 
-  protected static async populateTasks(
+  protected static async resolveTasks<T extends TTaskData>(
     topic: string,
     tasks: Record<string, string>[],
-  ): Promise<(TQueueTaskDetails<string> & {
-    progressTimeline: Array<TTaskProgress>;
-    errorTimeline: Array<TTaskError>;
-  })[]> {
-    const resolvedTasks = tasks.map((task) => ({
-      ...task,
-      data: task.data && JSON.parse(task.data),
-    })) as Array<
-      TQueueTaskDetails & {
-        progressTimeline: Array<TTaskProgress>;
-        errorTimeline: Array<TTaskError>;
-      }
-    >;
-
-    return await Promise.all(resolvedTasks.map(async (task) => {
-      const [progress, error] = await Promise.all(
-        [
-          this.listTaskProgress(topic, task.id),
-          this.listTaskError(topic, task.id),
-        ] as const,
-      );
-
-      task.progressTimeline = progress;
-      task.errorTimeline = error;
-
-      return task;
-    }));
-  }
-
-  protected static redisHashsToTasks(
-    hashs: string[][],
-    ...fields: string[]
-  ): Record<string, string>[] {
-    return hashs.map((hash) => {
-      const result: Record<string, string> = {};
-
-      if (fields.length) {
-        fields.forEach((k, i) => {
-          result[k] = hash[i];
-        });
-      } else {
-        for (let i = 0; i < hash.length; i += 2) {
-          result[hash[i]] = hash[i + 1];
+    opts?: {
+      progress?: boolean;
+      error?: boolean;
+    },
+  ) {
+    return await Promise.all(
+      tasks.map(async (task: Record<string, unknown>) => {
+        if (typeof task.data === "string") {
+          try {
+            task.data = JSON.parse(task.data);
+          } catch {
+            // Do nothing...
+          }
         }
-      }
 
-      return result;
-    });
+        const [progress, error] = await Promise.all(
+          [
+            opts?.progress !== false && typeof task.id === "string"
+              ? this.listTaskProgress(topic, task.id)
+              : [],
+            opts?.error !== false && typeof task.id === "string"
+              ? this.listTaskError(topic, task.id)
+              : [],
+          ] as const,
+        );
+
+        if (opts?.progress !== false) {
+          task.progressTimeline = progress;
+        }
+
+        if (opts?.error !== false) {
+          task.errorTimeline = error;
+        }
+
+        return task;
+      }),
+    ) as unknown as (TQueueTaskDetails<T> & {
+      progressTimeline?: Array<TTaskProgress>;
+      errorTimeline?: Array<TTaskError>;
+    })[];
   }
 
-  static async listTasks(topic: string, status: QueueTaskStatus, opts?: {
+  /**
+   * List the queued tasks
+   * @param topic
+   * @param opts
+   * @returns
+   */
+  public static async listTasks<T extends TTaskData>(topic: string, opts?: {
+    status?: QueueTaskStatus;
     offset?: number;
     limit?: number;
     sort?: TSort;
-    fields?: string[];
-  }): Promise<(TQueueTaskDetails<string> & {
-    progressTimeline: Array<TTaskProgress>;
-    errorTimeline: Array<TTaskError>;
-  })[]> {
-    const sort = opts?.sort ?? 1;
-    const offset = opts?.offset ?? 0;
-    const limit = opts?.limit ?? 10000000;
+    fields?: Array<
+      keyof TQueueTaskDetails | "progressTimeline" | "errorTimeline"
+    >;
+  }) {
+    const ids = await this.listTaskIds(topic, opts);
+
     const fields = opts?.fields
       ? Array.from(new Set(["id", ...opts.fields]))
-      : [];
+      : undefined;
 
-    const results = await this.redis.listTasks<string[]>(
-      this.resolveKey([topic, status]),
-      this.resolveKey([topic, "data"]),
-      sort,
-      offset,
-      limit,
-      ...fields,
-    );
+    const results: Record<string, string>[] = [];
 
-    return await this.populateTasks(
+    for (const id of ids) {
+      const dataKey = this.resolveKey([topic, "data", id]);
+
+      if (fields?.length) {
+        const values = await this.redis.hmget(
+          dataKey,
+          ...fields,
+        );
+
+        results.push(fields.reduce((obj, field, i) => {
+          if (values[i] !== null) obj[field] = values[i];
+
+          return obj;
+        }, {} as Record<string, string>));
+      } else {
+        results.push(await this.redis.hgetall(dataKey));
+      }
+    }
+
+    return await this.resolveTasks<T>(
       topic,
-      this.redisHashsToTasks(results),
+      results,
+      {
+        progress: fields?.includes("progressTimeline") ?? true,
+        error: fields?.includes("errorTimeline") ?? true,
+      },
     );
   }
 
-  static async listAllTasks(
+  /**
+   * Deletes the given tasks by id under a specific topic
+   * @param topic
+   * @param taskIds
+   * @returns
+   */
+  public static async delete(
     topic: string,
-  ): Promise<(TQueueTaskDetails<string> & {
-    progressTimeline: Array<TTaskProgress>;
-    errorTimeline: Array<TTaskError>;
-  })[]> {
-    return (await Promise.all(
-      Object.values(QueueTaskStatus).map((status) =>
-        this.listTasks(topic, status)
-      ),
-    )).flat();
-  }
+    ...taskIds: string[]
+  ): Promise<number> {
+    if (!taskIds.length) return 0;
 
-  static async retry(topic: string, taskId: string, ...taskIds: string[]) {
-    await this.redis.retryTask(
-      this.resolveKey(),
+    const idsKey = this.resolveKey([
       topic,
-      taskId,
-      ...taskIds,
-    );
-  }
-
-  static async retryAll(topic: string) {
-    await this.redis.retryAllTasks(this.resolveKey(), topic);
-  }
-
-  static async delete(topic: string, ...taskIds: string[]): Promise<number> {
+      "ids",
+    ]);
     const delayedKey = this.resolveKey([
       topic,
       QueueTaskStatus.DELAYED,
@@ -764,6 +915,7 @@ export class Queue {
       const tx = this.redis.multi();
 
       tx.del(dataKey);
+      tx.zrem(idsKey, taskId);
       tx.zrem(delayedKey, taskId);
       tx.zrem(waitingKey, taskId);
       tx.zrem(processingKey, taskId);
@@ -780,7 +932,12 @@ export class Queue {
     }))).reduce((_, num) => _ + num, 0);
   }
 
-  static async deleteAll(topic?: string): Promise<number> {
+  /**
+   * Deletes all tasks in a topic or all the topics
+   * @param topic
+   * @returns
+   */
+  public static async deleteAll(topic?: string): Promise<number> {
     return await this.redis.deleteKeysWithPattern(
       this.resolveKey(topic ? [topic, "*"] : "*"),
     );

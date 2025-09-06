@@ -34,7 +34,9 @@ Deno.test({
       throw new Error("Rate limiting is not working properly!");
     }
 
-    const list1 = await Queue.listTaskIds(topic, QueueTaskStatus.WAITING);
+    const list1 = await Queue.listTaskIds(topic, {
+      status: QueueTaskStatus.WAITING,
+    });
 
     if (list1.length !== 7) {
       throw new Error("Something is not right!");
@@ -48,7 +50,9 @@ Deno.test({
       throw new Error("Rate limiting is not working properly!");
     }
 
-    const list2 = await Queue.listTaskIds(topic, QueueTaskStatus.WAITING);
+    const list2 = await Queue.listTaskIds(topic, {
+      status: QueueTaskStatus.WAITING,
+    });
 
     if (list2.length !== 4) {
       throw new Error("Something is not right!");

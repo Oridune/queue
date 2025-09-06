@@ -7,7 +7,7 @@
 --
 -- Declare variables
 local pattern = KEYS[1]
-local batch_size = tonumber(ARGV[1]) or 10000 -- Default batch size
+local batch_size = tonumber(ARGV[1]) or 1000 -- Default batch size
 
 local cursor = "0"
 local deleted_count = 0
