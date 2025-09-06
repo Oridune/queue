@@ -827,6 +827,7 @@ export class Queue {
    * @returns
    */
   public static async listTasks<T extends TTaskData>(topic: string, opts?: {
+    id?: string;
     status?: QueueTaskStatus;
     offset?: number;
     limit?: number;
@@ -835,7 +836,9 @@ export class Queue {
       keyof TQueueTaskDetails | "progressTimeline" | "errorTimeline"
     >;
   }) {
-    const ids = await this.listTaskIds(topic, opts);
+    const ids = typeof opts?.id === "string"
+      ? [opts.id]
+      : await this.listTaskIds(topic, opts);
 
     const fields = opts?.fields
       ? Array.from(new Set(["id", ...opts.fields]))
