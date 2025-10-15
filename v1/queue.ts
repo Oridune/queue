@@ -2,6 +2,7 @@
 
 import { Redis, type RedisOptions } from "ioredis";
 import type { IRedis, TSort } from "./types.ts";
+import { fromFileUrl, join } from "path";
 import { QueueWorker, QueueWorkerEvent } from "./worker.ts";
 import { leader, type LeaderOpts } from "../common/leader.ts";
 
@@ -164,7 +165,12 @@ export class Queue {
     ].map(async (script) =>
       this.redis.defineCommand(script.name, {
         numberOfKeys: script.keys,
-        lua: (await import(script.path, { with: { type: "text" } })).default,
+        lua: await Deno.readTextFile(
+          join(
+            fromFileUrl(new URL(".", import.meta.url)),
+            script.path,
+          ),
+        ),
       })
     ));
   }

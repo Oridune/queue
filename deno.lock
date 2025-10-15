@@ -1,8 +1,21 @@
 {
-  "version": "4",
+  "version": "5",
   "specifiers": {
+    "jsr:@std/internal@^1.0.10": "1.0.12",
+    "jsr:@std/path@1.1.2": "1.1.2",
     "npm:ioredis@^5.4.1": "5.4.1",
     "npm:safe-redis-leader@^0.0.6": "0.0.6"
+  },
+  "jsr": {
+    "@std/internal@1.0.12": {
+      "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+    },
+    "@std/path@1.1.2": {
+      "integrity": "c0b13b97dfe06546d5e16bf3966b1cadf92e1cc83e56ba5476ad8b498d9e3038",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    }
   },
   "npm": {
     "@ioredis/commands@1.2.0": {
@@ -61,6 +74,7 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@std/path@1.1.2",
       "npm:ioredis@^5.4.1",
       "npm:safe-redis-leader@^0.0.6"
     ]
