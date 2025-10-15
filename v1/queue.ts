@@ -2,7 +2,6 @@
 
 import { Redis, type RedisOptions } from "ioredis";
 import type { IRedis, TSort } from "./types.ts";
-import { fromFileUrl, join } from "path";
 import { QueueWorker, QueueWorkerEvent } from "./worker.ts";
 import { leader, type LeaderOpts } from "../common/leader.ts";
 
@@ -162,17 +161,14 @@ export class Queue {
         keys: 3,
         path: "./lua/rateLimitIncr.lua",
       },
-    ].map(async (script) =>
-      this.redis.defineCommand(script.name, {
+    ].map(async (script) => {
+      const data = await fetch(import.meta.resolve(script.path));
+
+      return this.redis.defineCommand(script.name, {
         numberOfKeys: script.keys,
-        lua: await Deno.readTextFile(
-          join(
-            fromFileUrl(new URL(".", import.meta.url)),
-            script.path,
-          ),
-        ),
-      })
-    ));
+        lua: await data.text(),
+      });
+    }));
   }
 
   /**
