@@ -6,12 +6,14 @@ export type IRedis = Redis & {
   recoverTasks(
     namespace: string,
     thresholdMs: number,
+    timestamp: number
   ): Promise<string[]>;
 
   processTasks(
     namespace: string,
     count: number,
     sort: TSort,
+    timestamp: number
   ): Promise<string[]>;
 
   updateTaskProgress(
@@ -19,6 +21,7 @@ export type IRedis = Redis & {
     uuid: string,
     percentage: number,
     log: string,
+    timestamp: number
   ): Promise<1>;
 
   updateTaskError(

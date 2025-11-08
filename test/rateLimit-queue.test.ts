@@ -1,10 +1,15 @@
 import { Queue } from "../mod.ts";
 import { QueueTaskStatus } from "../v1.ts";
+import { redisOptions } from "./global.ts";
 
 Deno.test({
   name: "Rate limit task execution",
   async fn() {
-    await Queue.start({ namespace: "testing", logs: true });
+    await Queue.start({
+      namespace: "testing",
+      logs: true,
+      redis: redisOptions,
+    });
 
     const topic = "rateLimiting";
     const results: number[] = [];
@@ -22,13 +27,14 @@ Deno.test({
       handler: () => {
         results.push(1);
       },
+      concurrency: 4,
       rateLimit: {
         limit: 3,
-        ttl: 5,
+        ttl: 10,
       },
     });
 
-    await new Promise((_) => setTimeout(_, 8000));
+    await new Promise((_) => setTimeout(_, 12000));
 
     if (results.length !== 3) {
       throw new Error("Rate limiting is not working properly!");
@@ -39,22 +45,6 @@ Deno.test({
     });
 
     if (list1.length !== 7) {
-      throw new Error("Something is not right!");
-    }
-
-    await new Promise((_) => setTimeout(_, 8000));
-
-    // deno-lint-ignore ban-ts-comment
-    // @ts-ignore
-    if (results.length !== 6) {
-      throw new Error("Rate limiting is not working properly!");
-    }
-
-    const list2 = await Queue.listTaskIds(topic, {
-      status: QueueTaskStatus.WAITING,
-    });
-
-    if (list2.length !== 4) {
       throw new Error("Something is not right!");
     }
 

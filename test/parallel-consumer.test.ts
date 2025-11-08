@@ -1,10 +1,15 @@
 import { Queue } from "../mod.ts";
 import { QueueTaskStatus } from "../v1.ts";
+import { redisOptions } from "./global.ts";
 
 Deno.test({
   name: "Parallel task execution",
   async fn() {
-    await Queue.start({ namespace: "testing", logs: true });
+    await Queue.start({
+      namespace: "testing",
+      logs: true,
+      redis: redisOptions,
+    });
 
     const topic1 = "slowJobs";
     const topic2 = "fastJobs";
@@ -17,6 +22,7 @@ Deno.test({
     await Queue.subscribe(topic1, {
       handler: async (t) => {
         console.log("Slow execution", t.details.id);
+
         await new Promise((_) => setTimeout(_, 10000));
 
         if (!inserted) {
@@ -101,7 +107,7 @@ Deno.test({
       data: {},
     });
 
-    await new Promise((_) => setTimeout(_, 45000));
+    await new Promise((_) => setTimeout(_, 55000));
 
     const [tasks1, tasks2] = await Promise.all([
       Queue.listTasks(topic1, { status: QueueTaskStatus.WAITING }),
@@ -109,7 +115,12 @@ Deno.test({
     ]);
 
     if (tasks1.length || tasks2.length) {
-      throw new Error("Some tasks were not consumed!");
+      throw new Error("Some tasks were not consumed!", {
+        cause: {
+          task1Length: tasks1.length,
+          task2Length: tasks2.length,
+        },
+      });
     }
 
     const [tasks3, tasks4] = await Promise.all([
@@ -118,7 +129,12 @@ Deno.test({
     ]);
 
     if (tasks3.length !== 3 || tasks4.length !== 10) {
-      throw new Error("All tasks were not consumed!");
+      throw new Error("All tasks were not consumed!", {
+        cause: {
+          task3Length: tasks3.length,
+          task4Length: tasks4.length,
+        },
+      });
     }
 
     await Queue.stop(true);

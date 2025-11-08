@@ -39,12 +39,17 @@ export type TTaskError = {
 };
 
 export interface IQueueTaskPayload<T extends TTaskData> {
-  id: string;
+  id?: string;
   data: T;
   delayMs?: number;
   retryCount?: number;
+  retryDelayMs?: number;
   priority?: number;
   timeoutMs?: number;
+}
+
+export interface IQueueEnqueueOptions {
+  unique?: boolean;
 }
 
 export type TQueueTaskDetails<T = TTaskData> = {
@@ -52,6 +57,7 @@ export type TQueueTaskDetails<T = TTaskData> = {
   data: T;
   delayMs?: string;
   retryCount?: string;
+  retryDelayMs?: number;
   priority?: string;
   timeoutMs?: number;
   progress?: string;
@@ -88,6 +94,10 @@ export interface IQueueEventHandlerOptions<T extends TTaskData> {
   readonly shared?: boolean;
 }
 
+export interface IQueueSubscribeOptions {
+  replace?: boolean;
+}
+
 export interface IQueueInitOptions {
   logs?: boolean;
   namespace?: string;
@@ -118,17 +128,17 @@ export class Queue {
     await Promise.all([
       {
         name: "processTasks",
-        keys: 3,
+        keys: 4,
         path: "./lua/processTasks.lua",
       },
       {
         name: "recoverTasks",
-        keys: 2,
+        keys: 3,
         path: "./lua/recoverTasks.lua",
       },
       {
         name: "updateTaskProgress",
-        keys: 4,
+        keys: 5,
         path: "./lua/updateTaskProgress.lua",
       },
       {
@@ -357,6 +367,7 @@ export class Queue {
     const failedIds = await this.redis.recoverTasks(
       this.resolveKey(topic),
       this.taskExpiryMs,
+      Date.now(),
     );
 
     failedIds.length &&
@@ -378,6 +389,7 @@ export class Queue {
       this.resolveKey(topic),
       count,
       sort,
+      Date.now(),
     );
 
     movedTaskIds.length &&
@@ -462,14 +474,13 @@ export class Queue {
   public static async enqueue<T extends TTaskData>(
     topic: string,
     payload: IQueueTaskPayload<T>,
-    opts?: {
-      unique?: boolean;
-    },
+    opts?: IQueueEnqueueOptions,
   ) {
-    const dataKey = this.resolveKey([topic, "data", payload.id]);
+    const id = payload.id ?? crypto.randomUUID();
+    const dataKey = this.resolveKey([topic, "data", id]);
 
     if (opts?.unique && await this.redis.exists(dataKey)) {
-      throw new Error(`Task ID: ${payload.id} already exists!`);
+      throw new Error(`Task ID: ${id} already exists!`);
     }
 
     const now = Date.now();
@@ -478,10 +489,11 @@ export class Queue {
 
     const tx = this.redis.multi();
 
-    tx.zadd(idsKey, now, payload.id);
+    tx.zadd(idsKey, now, id);
 
     tx.hmset(dataKey, {
       ...payload,
+      attempt: 0,
       retryCount: payload.retryCount ?? 3,
       data: typeof payload.data === "object" && payload.data !== null
         ? JSON.stringify(payload.data)
@@ -498,7 +510,7 @@ export class Queue {
       tx.zadd(
         delayedKey,
         now + payload.delayMs,
-        payload.id,
+        id,
       );
     } else {
       const waitingKey = this.resolveKey([
@@ -509,13 +521,15 @@ export class Queue {
       tx.zadd(
         waitingKey,
         payload.priority ?? 0,
-        payload.id,
+        id,
       );
     }
 
     await tx.exec();
 
     this.log(LogType.INFO, () => ["New task added:", topic, payload, opts]);
+
+    return { id };
   }
 
   /**
@@ -538,8 +552,23 @@ export class Queue {
       opts,
     );
 
-    on("elected", () => onLock(shutdown));
-    on("demoted", () => onUnlock());
+    on("elected", () => {
+      this.log(
+        LogType.INFO,
+        () => ["Acquire Lock:", key, "elected"],
+      );
+
+      return onLock(shutdown);
+    });
+
+    on("demoted", () => {
+      this.log(
+        LogType.INFO,
+        () => ["Acquire Lock:", key, "demoted"],
+      );
+
+      return onUnlock();
+    });
 
     await elect();
 
@@ -558,9 +587,7 @@ export class Queue {
   public static async subscribe<T extends TTaskData>(
     topic: string,
     handlerOpts: IQueueEventHandlerOptions<T>,
-    opts?: {
-      replace?: boolean;
-    },
+    opts?: IQueueSubscribeOptions,
   ): Promise<{ unsubscribe: () => Promise<void> }> {
     const existing = this.subscriptions.get(topic);
 
@@ -820,6 +847,25 @@ export class Queue {
       progressTimeline?: Array<TTaskProgress>;
       errorTimeline?: Array<TTaskError>;
     })[];
+  }
+
+  /**
+   * Prepare a queue topic
+   * @param topic
+   * @returns
+   */
+  public static prepare<T extends TTaskData>(topic: string) {
+    return {
+      enqueue: (
+        payload: IQueueTaskPayload<T>,
+        opts?: IQueueEnqueueOptions,
+      ) => Queue.enqueue<T>(topic, payload, opts),
+      subscribe: (
+        handlerOpts: IQueueEventHandlerOptions<T>,
+        opts?: IQueueSubscribeOptions,
+      ) => Queue.subscribe<T>(topic, handlerOpts, opts),
+      unsubscribe: () => Queue.unsubscribe(topic),
+    };
   }
 
   /**

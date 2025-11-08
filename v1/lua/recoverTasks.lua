@@ -3,18 +3,20 @@
 -- KEYS:
 -- KEYS[1] - Namespace
 -- KEYS[2] - Expired task threshold (ExpiredTaskMs)
+-- KEYS[3] - Timestamp
 --
 -- Declare variables
 local namespace = KEYS[1];
 local thresholdMs = tonumber(KEYS[2])
+local timestamp = tonumber(KEYS[3])
 
 local heartbeatPrefix = namespace .. ":" .. "heartbeat"
 local processingPrefix = namespace .. ":" .. "processing"
 local failedPrefix = namespace .. ":" .. "failed"
 local dataPrefix = namespace .. ":" .. "data"
 
-local time = redis.call("TIME")
-local timestamp = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+-- local time = redis.call("TIME")
+-- local timestamp = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 
 -- Calculate the cutoff timestamp
 local cutoffTimestamp = timestamp - thresholdMs

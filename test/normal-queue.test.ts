@@ -1,9 +1,14 @@
 import { Queue } from "../mod.ts";
+import { redisOptions } from "./global.ts";
 
 Deno.test({
   name: "Normal task execution",
   async fn(t) {
-    await Queue.start({ namespace: "testing", logs: true });
+    await Queue.start({
+      namespace: "testing",
+      logs: true,
+      redis: redisOptions,
+    });
 
     const topic = "flowTest";
     const taskId = "normal";
@@ -34,7 +39,7 @@ Deno.test({
       },
     });
 
-    await new Promise((_) => setTimeout(_, 3000));
+    await new Promise((_) => setTimeout(_, 6000));
 
     if (!results.length) throw new Error("Normal task didn't executed!");
 

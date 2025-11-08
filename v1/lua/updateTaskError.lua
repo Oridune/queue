@@ -26,6 +26,7 @@ local priority = tonumber(ARGV[5]) or 0
 
 local dataKey = namespace .. ':' .. topic .. ':' .. 'data' .. ':' .. taskId
 local processingKey = namespace .. ':' .. topic .. ':' .. 'processing'
+local delayedKey = namespace .. ':' .. topic .. ':' .. 'delayed'
 local failedKey = namespace .. ':' .. topic .. ':' .. 'failed'
 local errorListKey = dataKey .. ':' .. 'error'
 local errorListItemKey = errorListKey .. ':' .. uuid
@@ -37,9 +38,12 @@ redis.call('RPUSH', errorListKey, uuid)
 redis.call('HSET', errorListItemKey, 'message', message, 'stack', stack, 'timestamp', timestamp)
 
 if moveToFailed > 0 then
-    redis.call('ZREM', processingKey, taskId)
     redis.call('ZADD', failedKey, priority, taskId)
+else
+    redis.call('ZADD', delayedKey, priority, taskId)
 end
+
+redis.call('ZREM', processingKey, taskId)
 
 -- Return success
 return 1

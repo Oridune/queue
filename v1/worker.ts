@@ -48,30 +48,30 @@ export class QueueWorker<T extends TTaskData> {
     return results;
   }
 
-  protected async withRetry<T extends unknown>(
-    attempt: number,
-    retryCount: number,
-    callback: (attempt: number, retryCount: number) => Promise<{
-      success: boolean;
-      data: T;
-    }>,
-  ) {
-    let results: T | undefined;
+  // protected async withRetry<T extends unknown>(
+  //   attempt: number,
+  //   retryCount: number,
+  //   callback: (attempt: number, retryCount: number) => Promise<{
+  //     success: boolean;
+  //     data: T;
+  //   }>,
+  // ) {
+  //   let results: T | undefined;
 
-    if (!this.stopped) {
-      do {
-        attempt++;
+  //   if (!this.stopped) {
+  //     do {
+  //       attempt++;
 
-        const { success, data } = await callback(attempt, retryCount);
+  //       const { success, data } = await callback(attempt, retryCount);
 
-        if (success) return data;
+  //       if (success) return data;
 
-        results = data;
-      } while (attempt < retryCount && !this.stopped);
-    }
+  //       results = data;
+  //     } while (attempt < retryCount && !this.stopped);
+  //   }
 
-    return results;
-  }
+  //   return results;
+  // }
 
   protected async withTimeout<T extends unknown>(
     callback: (signal?: AbortSignal) => T,
@@ -124,130 +124,143 @@ export class QueueWorker<T extends TTaskData> {
           crypto.randomUUID(),
           percentage,
           log ?? "Progress update",
+          Date.now(),
         );
       };
 
-      await this.withRetry(
-        Number(taskDetails.attempt ?? 0),
-        Number(taskDetails.retryCount ?? 0),
-        async (attempt, retryCount) => {
-          const success = await this.withTimeout(async (signal) => {
+      const attempt = Number(taskDetails.attempt ?? 0) + 1;
+      const retryCount = Number(taskDetails.retryCount ?? 0);
+      const retryDelayMs = Number(taskDetails.retryDelayMs ?? 3000);
+
+      // await this.withRetry(
+      //   Number(taskDetails.attempt ?? 0),
+      //   Number(taskDetails.retryCount ?? 0),
+      //   async (attempt, retryCount) => {
+      // const success =
+      await this.withTimeout(async (signal) => {
+        try {
+          // Mark attempt
+          const timestamp = Date.now();
+
+          const startTx = this.queue.redis.multi();
+
+          startTx.hincrby(dataKey, "attempt", 1);
+
+          if (attempt > 1) {
+            startTx.hset(
+              dataKey,
+              "retriedOn",
+              timestamp,
+            );
+
+            taskDetails.retriedOn = timestamp.toString();
+          } else {
+            startTx.hset(
+              dataKey,
+              "processedOn",
+              timestamp,
+            );
+
+            taskDetails.processedOn = timestamp.toString();
+          }
+
+          await startTx.exec();
+
+          taskDetails.attempt = attempt.toString();
+
+          let data = taskDetails.data as T;
+
+          if (typeof data === "string") {
             try {
-              // Mark attempt
-              const timestamp = Date.now();
-
-              const startTx = this.queue.redis.multi();
-
-              startTx.hincrby(dataKey, "attempt", 1);
-
-              if (attempt > 1) {
-                startTx.hset(
-                  dataKey,
-                  "retriedOn",
-                  timestamp,
-                );
-
-                taskDetails.retriedOn = timestamp.toString();
-              } else {
-                startTx.hset(
-                  dataKey,
-                  "processedOn",
-                  timestamp,
-                );
-
-                taskDetails.processedOn = timestamp.toString();
-              }
-
-              await startTx.exec();
-
-              taskDetails.attempt = attempt.toString();
-
-              // Mark task completion
-              const endTx = this.queue.redis.multi();
-
-              endTx.zrem(processingKey, taskDetails.id);
-              endTx.zadd(completedKey, 0, taskDetails.id);
-              endTx.hset(dataKey, "completedOn", Date.now());
-
-              let data = taskDetails.data as T;
-
-              if (typeof data === "string") {
-                try {
-                  data = JSON.parse(data);
-                } catch {
-                  // Do nothing...
-                }
-              }
-
-              // Handle task execution
-              const results = await this.handlerOpts.handler({
-                details: {
-                  ...taskDetails,
-                  data,
-                },
-                progress,
-                signal,
-              });
-
-              endTx.hmset(dataKey, { results: JSON.stringify(results) });
-
-              await endTx.exec();
-
-              return true;
-            } catch (err) {
-              // deno-lint-ignore no-explicit-any
-              const error: any = err;
-
-              this.queue.log(
-                LogType.ERROR,
-                () => [
-                  "Topic:",
-                  this.topic,
-                  "Index:",
-                  index,
-                  "Stack:",
-                  error,
-                  "Attempt:",
-                  attempt,
-                  "Remaining Attempts:",
-                  retryCount - attempt,
-                ],
-              );
-
-              await this.queue.redis.updateTaskError(
-                this.queue.resolveKey(),
-                this.topic,
-                taskDetails.id,
-                crypto.randomUUID(),
-                String(error?.message ?? error),
-                String(error?.stack),
-                Date.now(),
-                attempt >= retryCount ? 1 : 0,
-                Number(taskDetails.priority ?? 0),
-              );
+              data = JSON.parse(data);
+            } catch {
+              // Do nothing...
             }
+          }
 
-            return false;
-          }, taskDetails.timeoutMs ?? this.handlerOpts.timeoutMs);
+          // Handle task execution
+          const results = await this.handlerOpts.handler({
+            details: {
+              ...taskDetails,
+              data,
+            },
+            progress,
+            signal,
+          });
 
-          return { success, data: undefined };
-        },
-      );
+          // Mark task completion
+          const endTx = this.queue.redis.multi();
+
+          endTx.zadd(completedKey, 0, taskDetails.id);
+          endTx.zrem(processingKey, taskDetails.id);
+          endTx.hmset(dataKey, {
+            results: JSON.stringify(results),
+            completedOn: Date.now(),
+          });
+
+          await endTx.exec();
+
+          return true;
+        } catch (err) {
+          // deno-lint-ignore no-explicit-any
+          const error: any = err;
+
+          this.queue.log(
+            LogType.ERROR,
+            () => [
+              "Topic:",
+              this.topic,
+              "Index:",
+              index,
+              "Stack:",
+              error,
+              "Attempt:",
+              attempt,
+              "Remaining Attempts:",
+              retryCount - attempt,
+            ],
+          );
+
+          const now = Date.now();
+          const failed = attempt >= retryCount;
+
+          await this.queue.redis.updateTaskError(
+            this.queue.resolveKey(),
+            this.topic,
+            taskDetails.id,
+            crypto.randomUUID(),
+            String(error?.message ?? error),
+            String(error?.stack),
+            now,
+            failed ? 1 : 0,
+            failed
+              ? Number(taskDetails.priority ?? 0)
+              : now + retryDelayMs * attempt,
+          );
+        }
+
+        return true;
+      }, taskDetails.timeoutMs ?? this.handlerOpts.timeoutMs);
+
+      //     return { success, data: undefined };
+      //   },
+      // );
     });
   }
 
   protected async runJobPool(concurrency: number, sort: TSort) {
     const activeSlots: Array<Promise<unknown>> = [];
     const controllers: Array<AbortController> = [];
+    const tickers: Array<Ticker> = [];
 
     const createSlot = (index: number) => {
       const controller = new AbortController();
+      const ticker = new Ticker();
 
       return [
         controller,
+        ticker,
         new Promise((resolve) => {
-          const ticker = new Ticker();
-
           ticker.start(async () => {
             if (this.stopped || controller.signal.aborted) {
               resolve(this.topic);
@@ -311,18 +324,21 @@ export class QueueWorker<T extends TTaskData> {
     };
 
     const incrSlot = (index: number) => {
-      const [controller, slot] = createSlot(index);
+      const [controller, ticker, slot] = createSlot(index);
 
-      activeSlots.push(slot);
       controllers.push(controller);
+      tickers.push(ticker);
+      activeSlots.push(slot);
     };
 
     const decrSlot = async () => {
       if (activeSlots.length > 1) {
-        const slot = activeSlots.pop();
         const controller = controllers.pop();
+        const slot = activeSlots.pop();
+        const ticker = tickers.pop();
 
         controller?.abort();
+        ticker?.stop();
 
         await slot;
       }
@@ -365,6 +381,11 @@ export class QueueWorker<T extends TTaskData> {
     const sort = this.handlerOpts.sort ?? 1;
 
     await this.runJobPool(concurrency, sort);
+
+    this.queue.log(
+      LogType.INFO,
+      () => ["Attempting to stop:", this.topic],
+    );
 
     dispatchEvent(new CustomEvent(QueueWorkerEvent.POOL_STOP + this.topic));
   }

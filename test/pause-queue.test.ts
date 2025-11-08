@@ -1,10 +1,15 @@
 import { Queue } from "../mod.ts";
 import { QueueTaskStatus } from "../v1.ts";
+import { redisOptions } from "./global.ts";
 
 Deno.test({
   name: "Pause queue check",
   async fn(t) {
-    await Queue.start({ namespace: "testing", logs: true });
+    await Queue.start({
+      namespace: "testing",
+      logs: true,
+      redis: redisOptions,
+    });
 
     await t.step("Global pause", async () => {
       const topic = "globalPauseTest";
@@ -17,6 +22,8 @@ Deno.test({
 
           if (t.details.id === "t1") {
             await Queue.pause();
+
+            console.log("Paused!");
           }
         },
       });
@@ -31,7 +38,7 @@ Deno.test({
         data: {},
       });
 
-      await new Promise((_) => setTimeout(_, 2000));
+      await new Promise((_) => setTimeout(_, 3000));
 
       const tasks1 = await Queue.listTaskIds(topic, {
         status: QueueTaskStatus.WAITING,
@@ -48,6 +55,8 @@ Deno.test({
       }
 
       await Queue.resume();
+
+      console.log("Resumed!");
 
       await new Promise((_) => setTimeout(_, 7000));
 
@@ -89,7 +98,7 @@ Deno.test({
         data: {},
       });
 
-      await new Promise((_) => setTimeout(_, 2000));
+      await new Promise((_) => setTimeout(_, 3000));
 
       const tasks1 = await Queue.listTasks(topic, {
         status: QueueTaskStatus.WAITING,
@@ -107,7 +116,7 @@ Deno.test({
 
       await Queue.resume();
 
-      await new Promise((_) => setTimeout(_, 7000));
+      await new Promise((_) => setTimeout(_, 8000));
 
       const tasks2 = await Queue.listTaskIds(topic, {
         status: QueueTaskStatus.WAITING,
@@ -119,7 +128,7 @@ Deno.test({
 
       await Queue.resume(topic);
 
-      await new Promise((_) => setTimeout(_, 7000));
+      await new Promise((_) => setTimeout(_, 8000));
 
       const tasks3 = await Queue.listTaskIds(topic, {
         status: QueueTaskStatus.WAITING,

@@ -1,9 +1,14 @@
 import { Queue } from "../mod.ts";
+import { redisOptions } from "./global.ts";
 
 Deno.test({
   name: "Priority task execution",
   async fn() {
-    await Queue.start({ namespace: "testing", logs: true });
+    await Queue.start({
+      namespace: "testing",
+      logs: true,
+      redis: redisOptions,
+    });
 
     const topic = "flowTest";
 

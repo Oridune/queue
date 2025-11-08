@@ -4,18 +4,20 @@
 -- KEYS[1] - Namespace
 -- KEYS[2] - Count
 -- KEYS[3] - Sort
+-- KEYS[4] - Timestamp
 --
 -- Declare variables
 local namespace = KEYS[1];
 local taskCount = tonumber(KEYS[2])
 local sort = tonumber(KEYS[3])
+local timestamp = tonumber(KEYS[4])
 
 local delayedPrefix = namespace .. ":" .. "delayed"
 local waitingPrefix = namespace .. ":" .. "waiting"
 local processingPrefix = namespace .. ":" .. "processing"
 
-local time = redis.call("TIME")
-local timestamp = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+-- local time = redis.call("TIME")
+-- local timestamp = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
 
 -- Fetch delayed tasks
 local delayedIds = {}
