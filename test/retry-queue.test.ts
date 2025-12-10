@@ -44,7 +44,8 @@ Deno.test({
 
         throw new Error("Try again!");
       },
-    }, { replace: true });
+      replaceExistingSubscription: true,
+    });
 
     await Queue.enqueue(topic, {
       id: "bar",

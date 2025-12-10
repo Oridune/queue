@@ -16,75 +16,89 @@ local delayedPrefix = namespace .. ":" .. "delayed"
 local waitingPrefix = namespace .. ":" .. "waiting"
 local processingPrefix = namespace .. ":" .. "processing"
 
--- local time = redis.call("TIME")
--- local timestamp = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
-
--- Fetch delayed tasks
+-- Fetch delayed tasks (with scores)
 local delayedIds = {}
 
 if taskCount > 0 then
-    delayedIds = redis.call('ZRANGEBYSCORE', delayedPrefix, '-inf', timestamp, 'LIMIT', 0, taskCount)
+    delayedIds = redis.call('ZRANGEBYSCORE', delayedPrefix, '-inf', timestamp, 'WITHSCORES', 'LIMIT', 0, taskCount)
 else
-    delayedIds = redis.call('ZRANGEBYSCORE', delayedPrefix, '-inf', timestamp)
+    delayedIds = redis.call('ZRANGEBYSCORE', delayedPrefix, '-inf', timestamp, 'WITHSCORES')
 end
 
--- Fetch waiting tasks if needed
+-- Fetch waiting tasks if needed (with scores)
 local waitingIds = {}
 
 if taskCount > 0 then
-    if #delayedIds < taskCount then
-        local remaining = taskCount - #delayedIds
+    -- only fetch waiting if we still need more
+    local fetchedCount = #delayedIds / 2 -- each item is (id, score)
+
+    if fetchedCount < taskCount then
+        local remaining = taskCount - fetchedCount
 
         if sort > 0 then
-            waitingIds = redis.call('ZRANGEBYSCORE', waitingPrefix, '-inf', '+inf', 'LIMIT', 0, remaining)
+            waitingIds = redis.call('ZRANGEBYSCORE', waitingPrefix, '-inf', '+inf', 'WITHSCORES', 'LIMIT', 0, remaining)
         else
-            waitingIds = redis.call('ZREVRANGEBYSCORE', waitingPrefix, '+inf', '-inf', 'LIMIT', 0, remaining)
+            waitingIds = redis.call('ZREVRANGEBYSCORE', waitingPrefix, '+inf', '-inf', 'WITHSCORES', 'LIMIT', 0,
+                remaining)
         end
     end
 else
     if sort > 0 then
-        waitingIds = redis.call('ZRANGEBYSCORE', waitingPrefix, '-inf', '+inf')
+        waitingIds = redis.call('ZRANGEBYSCORE', waitingPrefix, '-inf', '+inf', 'WITHSCORES')
     else
-        waitingIds = redis.call('ZREVRANGEBYSCORE', waitingPrefix, '+inf', '-inf')
+        waitingIds = redis.call('ZREVRANGEBYSCORE', waitingPrefix, '+inf', '-inf', 'WITHSCORES')
     end
 end
 
--- Move tasks to the processing set
--- Move delayed tasks
+-- Move delayed tasks to the processing set using their original scores
 if #delayedIds > 0 then
     local zaddArgs = {}
+    local delayedMembers = {}
 
-    for _, id in ipairs(delayedIds) do
-        table.insert(zaddArgs, timestamp + 10000)
+    -- delayedIds = { id1, score1, id2, score2, ... }
+    for i = 1, #delayedIds, 2 do
+        local id = delayedIds[i]
+        local score = tonumber(delayedIds[i + 1])
+
+        table.insert(zaddArgs, score)
         table.insert(zaddArgs, id)
+
+        table.insert(delayedMembers, id)
     end
 
     redis.call('ZADD', processingPrefix, unpack(zaddArgs))
-    redis.call('ZREM', delayedPrefix, unpack(delayedIds))
+    redis.call('ZREM', delayedPrefix, unpack(delayedMembers))
 end
 
--- Move waiting tasks
+-- Move waiting tasks to the processing set using their original scores
 if #waitingIds > 0 then
     local zaddArgs = {}
+    local waitingMembers = {}
 
-    for _, id in ipairs(waitingIds) do
-        table.insert(zaddArgs, timestamp + 10000)
+    -- waitingIds = { id1, score1, id2, score2, ... }
+    for i = 1, #waitingIds, 2 do
+        local id = waitingIds[i]
+        local score = tonumber(waitingIds[i + 1])
+
+        table.insert(zaddArgs, score)
         table.insert(zaddArgs, id)
+
+        table.insert(waitingMembers, id)
     end
 
     redis.call('ZADD', processingPrefix, unpack(zaddArgs))
-    redis.call('ZREM', waitingPrefix, unpack(waitingIds))
+    redis.call('ZREM', waitingPrefix, unpack(waitingMembers))
 end
 
--- Return the list of moved task IDs
+-- Return the list of moved task IDs (only IDs, no scores)
 local movedIds = {}
 
-for _, id in ipairs(delayedIds) do
-    table.insert(movedIds, id)
+for i = 1, #delayedIds, 2 do
+    table.insert(movedIds, delayedIds[i])
 end
 
-for _, id in ipairs(waitingIds) do
-    table.insert(movedIds, id)
+for i = 1, #waitingIds, 2 do
+    table.insert(movedIds, waitingIds[i])
 end
 
 return movedIds

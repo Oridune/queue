@@ -16,6 +16,7 @@
         "setbit",
         "WITHSCORES",
         "zadd",
+        "zcard",
         "ZRANGE",
         "ZRANGEBYSCORE",
         "ZREM",

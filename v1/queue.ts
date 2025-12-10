@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 
 import { Redis, type RedisOptions } from "ioredis";
-import type { IRedis, TSort } from "./types.ts";
+import type { IRedis, TSchedules, TSort } from "./types.ts";
 import { QueueWorker, QueueWorkerEvent } from "./worker.ts";
 import { leader, type LeaderOpts } from "../common/leader.ts";
 
@@ -63,6 +63,7 @@ export type TQueueTaskDetails<T = TTaskData> = {
   progress?: string;
   attempt?: string;
   processedOn: string;
+  createdOn: string;
   updatedOn: string;
   retriedOn?: string;
   completedOn?: string;
@@ -80,29 +81,103 @@ export interface IQueueEvent<T extends TTaskData> {
 }
 
 export interface IQueueEventHandlerOptions<T extends TTaskData> {
+  /**
+   * Number of concurrent tasks to process
+   */
   concurrency?: number | (() => number | Promise<number>);
+
+  /**
+   * Sort order for processing tasks (1 for ASC > FIFO, -1 for DESC > LIFO)
+   */
   sort?: TSort;
+
+  /**
+   * Handler function to process the tasks
+   * @param event task event details
+   * @returns
+   */
   handler: (
     event: IQueueEvent<T>,
   ) => unknown | Promise<unknown>;
+
+  /**
+   * Task timeout in milliseconds (An abort signal will be sent to the handler when timeout occurs)
+   */
   timeoutMs?: number;
+
+  /**
+   * Rate limit configuration (Number of tasks to execute per TTL)
+   */
   rateLimit?: {
     limit: number;
     ttl: number;
   };
-  worker?: QueueWorker<T>;
-  readonly shared?: boolean;
-}
 
-export interface IQueueSubscribeOptions {
-  replace?: boolean;
+  /**
+   * Worker instance (If not provided a new instance will be created)
+   */
+  worker?: QueueWorker<T>;
+
+  /**
+   * Whether this subscription is shared or not (If true, multiple subscribers can consume tasks from the same topic)
+   *
+   * Default: false
+   */
+  readonly shared?: boolean;
+
+  /**
+   * Whether to replace an existing subscription for the same topic or not
+   *
+   * Default: false
+   */
+  replaceExistingSubscription?: boolean;
+
+  /**
+   * Assign a schedule to the subscription (If provided, the worker will only run on the defined schedules)
+   *
+   * For example you may want to run a heavy task only during off-peak hours
+   */
+  executionSchedules?: TSchedules;
+
+  /**
+   * How many maximum completed tasks to keep in the completed list (Older tasks will be removed)
+   *
+   * Default: Unlimited
+   */
+  completedCap?: number;
+
+  /**
+   * How many maximum failed tasks to keep in the failed list (Older tasks will be removed)
+   *
+   * Default: Unlimited
+   */
+  failedCap?: number;
 }
 
 export interface IQueueInitOptions {
+  /**
+   * Enable logs
+   */
   logs?: boolean;
+
+  /**
+   * Namespace for the queue keys in redis
+   */
   namespace?: string;
+
+  /**
+   * Redis connection options
+   */
   redis?: TRedisOpts;
+
+  /**
+   * Crashed task expiry time in milliseconds (default 10000 ms)
+   */
   taskExpiryMs?: number;
+
+  /**
+   * On which tick to recover crashed tasks (default 10) - higher means less frequent
+   */
   taskRecoveryIteration?: number;
 }
 
@@ -118,7 +193,7 @@ export class Queue {
   protected static enableLogs = false;
   protected static namespace = ["OriduneQueue"];
   protected static subscriptions: Map<string, TSubscriptionDetails> = new Map();
-  protected static taskExpiryMs = 10000;
+  protected static taskExpiryMs = 10000; // taskExpiryMs represents the time after which a processing task is considered crashed/incomplete (based on last heartbeat)
   protected static taskRecoveryIteration = 10;
 
   protected static Redis?: Redis;
@@ -512,6 +587,17 @@ export class Queue {
         now + payload.delayMs,
         id,
       );
+    } else if (typeof payload.priority === "number" && payload.priority !== 0) {
+      const delayedKey = this.resolveKey([
+        topic,
+        QueueTaskStatus.DELAYED,
+      ]);
+
+      tx.zadd(
+        delayedKey,
+        -payload.priority,
+        id,
+      );
     } else {
       const waitingKey = this.resolveKey([
         topic,
@@ -520,7 +606,7 @@ export class Queue {
 
       tx.zadd(
         waitingKey,
-        payload.priority ?? 0,
+        now,
         id,
       );
     }
@@ -587,18 +673,13 @@ export class Queue {
   public static async subscribe<T extends TTaskData>(
     topic: string,
     handlerOpts: IQueueEventHandlerOptions<T>,
-    opts?: IQueueSubscribeOptions,
   ): Promise<{ unsubscribe: () => Promise<void> }> {
     const existing = this.subscriptions.get(topic);
 
     if (existing) {
-      if (opts?.replace) {
+      if (handlerOpts?.replaceExistingSubscription) {
         await existing.unsubscribe();
-
-        return this.subscribe(topic, handlerOpts, opts);
-      }
-
-      return existing;
+      } else return existing;
     }
 
     const subscribe = () => {
@@ -753,6 +834,19 @@ export class Queue {
   }
 
   /**
+   * Count all tasks from a specific topic
+   * @param topic
+   * @param opts
+   * @returns
+   */
+  public static async countTasks(
+    topic: string,
+    status?: QueueTaskStatus,
+  ): Promise<number> {
+    return await this.redis.zcard(this.resolveKey([topic, status ?? "ids"]));
+  }
+
+  /**
    * List any in-progress task's current progress timeline
    * @param topic
    * @param taskId
@@ -858,12 +952,10 @@ export class Queue {
     return {
       enqueue: (
         payload: IQueueTaskPayload<T>,
-        opts?: IQueueEnqueueOptions,
-      ) => Queue.enqueue<T>(topic, payload, opts),
+      ) => Queue.enqueue<T>(topic, payload),
       subscribe: (
         handlerOpts: IQueueEventHandlerOptions<T>,
-        opts?: IQueueSubscribeOptions,
-      ) => Queue.subscribe<T>(topic, handlerOpts, opts),
+      ) => Queue.subscribe<T>(topic, handlerOpts),
       unsubscribe: () => Queue.unsubscribe(topic),
     };
   }

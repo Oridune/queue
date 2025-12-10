@@ -1,3 +1,4 @@
+import { throttleCache } from "../common/utils.ts";
 import {
   type IQueueEventHandlerOptions,
   LogType,
@@ -47,31 +48,6 @@ export class QueueWorker<T extends TTaskData> {
 
     return results;
   }
-
-  // protected async withRetry<T extends unknown>(
-  //   attempt: number,
-  //   retryCount: number,
-  //   callback: (attempt: number, retryCount: number) => Promise<{
-  //     success: boolean;
-  //     data: T;
-  //   }>,
-  // ) {
-  //   let results: T | undefined;
-
-  //   if (!this.stopped) {
-  //     do {
-  //       attempt++;
-
-  //       const { success, data } = await callback(attempt, retryCount);
-
-  //       if (success) return data;
-
-  //       results = data;
-  //     } while (attempt < retryCount && !this.stopped);
-  //   }
-
-  //   return results;
-  // }
 
   protected async withTimeout<T extends unknown>(
     callback: (signal?: AbortSignal) => T,
@@ -132,11 +108,6 @@ export class QueueWorker<T extends TTaskData> {
       const retryCount = Number(taskDetails.retryCount ?? 0);
       const retryDelayMs = Number(taskDetails.retryDelayMs ?? 3000);
 
-      // await this.withRetry(
-      //   Number(taskDetails.attempt ?? 0),
-      //   Number(taskDetails.retryCount ?? 0),
-      //   async (attempt, retryCount) => {
-      // const success =
       await this.withTimeout(async (signal) => {
         try {
           // Mark attempt
@@ -191,7 +162,7 @@ export class QueueWorker<T extends TTaskData> {
           // Mark task completion
           const endTx = this.queue.redis.multi();
 
-          endTx.zadd(completedKey, 0, taskDetails.id);
+          endTx.zadd(completedKey, Number(taskDetails.createdOn), taskDetails.id);
           endTx.zrem(processingKey, taskDetails.id);
           endTx.hmset(dataKey, {
             results: JSON.stringify(results),
@@ -239,12 +210,10 @@ export class QueueWorker<T extends TTaskData> {
           );
         }
 
+        await this.cleanup();
+
         return true;
       }, taskDetails.timeoutMs ?? this.handlerOpts.timeoutMs);
-
-      //     return { success, data: undefined };
-      //   },
-      // );
     });
   }
 
@@ -255,7 +224,7 @@ export class QueueWorker<T extends TTaskData> {
 
     const createSlot = (index: number) => {
       const controller = new AbortController();
-      const ticker = new Ticker();
+      const ticker = new Ticker(this.handlerOpts.executionSchedules);
 
       return [
         controller,
@@ -363,11 +332,64 @@ export class QueueWorker<T extends TTaskData> {
     redisSubscriber.disconnect();
   }
 
+  protected cleanup: QueueWorker<T>["_cleanup"];
+  protected async _cleanup() {
+    await this.cleanupCompletedTasks();
+    await this.cleanupFailedTasks();
+  }
+
+  protected async cleanupCompletedTasks() {
+    if (typeof this.handlerOpts.completedCap !== "number") return;
+
+    const completeCount = await this.queue.countTasks(
+      this.topic,
+      QueueTaskStatus.COMPLETED,
+    );
+
+    if (completeCount > this.handlerOpts.completedCap) {
+      await this.deleteLastTasks(
+        QueueTaskStatus.COMPLETED,
+        completeCount - this.handlerOpts.completedCap,
+      );
+    }
+  }
+
+  protected async cleanupFailedTasks() {
+    if (typeof this.handlerOpts.failedCap !== "number") return;
+
+    const failedCount = await this.queue.countTasks(
+      this.topic,
+      QueueTaskStatus.FAILED,
+    );
+
+    if (failedCount > this.handlerOpts.failedCap) {
+      await this.deleteLastTasks(
+        QueueTaskStatus.FAILED,
+        failedCount - this.handlerOpts.failedCap,
+      );
+    }
+  }
+
+  protected async deleteLastTasks(status: QueueTaskStatus, limit: number) {
+    if(limit <= 0) return;
+
+    const taskIds = await this.queue.listTaskIds(this.topic, {
+      status,
+      sort: 1,
+      offset: 0,
+      limit,
+    });
+
+    await this.queue.delete(this.topic, ...taskIds);
+  }
+
   constructor(
     protected queue: typeof Queue,
     protected topic: string,
     protected handlerOpts: IQueueEventHandlerOptions<T>,
-  ) {}
+  ) {
+    this.cleanup = throttleCache(this._cleanup.bind(this), 60000); // Throttle to once per minute
+  }
 
   public async run() {
     this.stopped = false;
@@ -391,12 +413,14 @@ export class QueueWorker<T extends TTaskData> {
   }
 
   public async stop() {
-    this.stopped = true;
-
-    await new Promise((resolve) => {
+    const promise = new Promise((resolve) => {
       addEventListener(QueueWorkerEvent.POOL_STOP + this.topic, resolve, {
         once: true,
       });
     });
+
+    this.stopped = true;
+
+    await promise;
   }
 }

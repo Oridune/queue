@@ -54,7 +54,8 @@ Deno.test({
       handler: async ({ signal }) => {
         await longRunningFunction(signal);
       },
-    }, { replace: true });
+      replaceExistingSubscription: true,
+    });
 
     await new Promise((_) => setTimeout(_, 6000));
 
