@@ -149,6 +149,13 @@ export class QueueWorker<T extends TTaskData> {
             }
           }
 
+          if (typeof this.handlerOpts.validate === "function") {
+            data = await this.handlerOpts.validate(
+              data,
+              taskDetails,
+            );
+          }
+
           // Handle task execution
           const results = await this.handlerOpts.handler({
             details: {

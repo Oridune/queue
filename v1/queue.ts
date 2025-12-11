@@ -41,6 +41,7 @@ export type TTaskError = {
 export interface IQueueTaskPayload<T extends TTaskData> {
   id?: string;
   data: T;
+  validate?: TTaskDataValidator<T>;
   delayMs?: number;
   retryCount?: number;
   retryDelayMs?: number;
@@ -80,6 +81,11 @@ export interface IQueueEvent<T extends TTaskData> {
   signal?: AbortSignal;
 }
 
+export type TTaskDataValidator<T extends TTaskData> = (
+  data: unknown,
+  details?: TQueueTaskDetails<unknown>,
+) => T | Promise<T>;
+
 export interface IQueueEventHandlerOptions<T extends TTaskData> {
   /**
    * Number of concurrent tasks to process
@@ -90,6 +96,13 @@ export interface IQueueEventHandlerOptions<T extends TTaskData> {
    * Sort order for processing tasks (1 for ASC > FIFO, -1 for DESC > LIFO)
    */
   sort?: TSort;
+
+  /**
+   * Pass a validation function to validate the task data before processing
+   * @param data task data
+   * @returns
+   */
+  validate?: TTaskDataValidator<T>;
 
   /**
    * Handler function to process the tasks
@@ -551,6 +564,16 @@ export class Queue {
     payload: IQueueTaskPayload<T>,
     opts?: IQueueEnqueueOptions,
   ) {
+    let data = payload.data;
+
+    if (typeof payload.validate === "function") {
+      data = await payload.validate(data);
+    }
+
+    const stringifiedData = typeof data === "object" && data !== null
+      ? JSON.stringify(data)
+      : "{}";
+
     const id = payload.id ?? crypto.randomUUID();
     const dataKey = this.resolveKey([topic, "data", id]);
 
@@ -570,9 +593,7 @@ export class Queue {
       ...payload,
       attempt: 0,
       retryCount: payload.retryCount ?? 3,
-      data: typeof payload.data === "object" && payload.data !== null
-        ? JSON.stringify(payload.data)
-        : "{}",
+      data: stringifiedData,
       createdOn: now,
     });
 
@@ -806,14 +827,17 @@ export class Queue {
    * @param topic
    * @returns
    */
-  public static prepare<T extends TTaskData>(topic: string) {
+  public static prepare<T extends TTaskData>(
+    topic: string,
+    validate?: TTaskDataValidator<T>,
+  ) {
     return {
       enqueue: (
-        payload: IQueueTaskPayload<T>,
-      ) => Queue.enqueue<T>(topic, payload),
+        payload: Omit<IQueueTaskPayload<T>, "validate">,
+      ) => Queue.enqueue<T>(topic, { ...payload, validate }),
       subscribe: (
-        handlerOpts: IQueueEventHandlerOptions<T>,
-      ) => Queue.subscribe<T>(topic, handlerOpts),
+        handlerOpts: Omit<IQueueEventHandlerOptions<T>, "validate">,
+      ) => Queue.subscribe<T>(topic, { ...handlerOpts, validate }),
       unsubscribe: () => Queue.unsubscribe(topic),
     };
   }
