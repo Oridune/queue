@@ -1,4 +1,4 @@
-import { throttleCache } from "../common/utils.ts";
+import { paginated, throttleCache } from "../common/utils.ts";
 import {
   type IQueueEventHandlerOptions,
   LogType,
@@ -392,14 +392,18 @@ export class QueueWorker<T extends TTaskData> {
   protected async deleteLastTasks(status: QueueTaskStatus, limit: number) {
     if (limit <= 0) return;
 
-    const taskIds = await this.queue.listTaskIds(this.topic, {
-      status,
-      sort: 1,
-      offset: 0,
-      limit,
-    });
+    await paginated(Math.min(limit, 500), async (offset, batchLimit) => {
+      const taskIds = await this.queue.listTaskIds(this.topic, {
+        status,
+        sort: 1,
+        offset,
+        limit: batchLimit,
+      });
 
-    await this.queue.delete(this.topic, ...taskIds);
+      await this.queue.delete(this.topic, ...taskIds);
+
+      return (offset + batchLimit) < limit ? taskIds.length : 0;
+    });
   }
 
   constructor(
