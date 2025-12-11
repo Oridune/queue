@@ -19,8 +19,18 @@ Deno.test({
       delayMs,
     });
 
+    const resolveMap: Record<
+      string,
+      (value: void | PromiseLike<void>) => void
+    > = {};
+    const promise = new Promise<void>((res) => {
+      resolveMap[taskId] = res;
+    });
+
     await Queue.subscribe(topic, {
-      handler: () => {
+      handler: ({ details: { id } }) => {
+        resolveMap[id]?.();
+
         results.push(1);
       },
     });
@@ -29,7 +39,9 @@ Deno.test({
 
     if (results.length) throw new Error("Delayed task executed early!");
 
-    await new Promise((_) => setTimeout(_, delayMs + 500));
+    console.log("Waiting for task...");
+
+    await promise;
 
     if (!results.length) throw new Error("Delayed task didn't executed!");
 

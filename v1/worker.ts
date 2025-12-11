@@ -162,7 +162,11 @@ export class QueueWorker<T extends TTaskData> {
           // Mark task completion
           const endTx = this.queue.redis.multi();
 
-          endTx.zadd(completedKey, Number(taskDetails.createdOn), taskDetails.id);
+          endTx.zadd(
+            completedKey,
+            Number(taskDetails.createdOn),
+            taskDetails.id,
+          );
           endTx.zrem(processingKey, taskDetails.id);
           endTx.hmset(dataKey, {
             results: JSON.stringify(results),
@@ -208,9 +212,9 @@ export class QueueWorker<T extends TTaskData> {
               ? Number(taskDetails.priority ?? 0)
               : now + retryDelayMs * attempt,
           );
+        } finally {
+          await this.cleanup();
         }
-
-        await this.cleanup();
 
         return true;
       }, taskDetails.timeoutMs ?? this.handlerOpts.timeoutMs);
@@ -334,6 +338,14 @@ export class QueueWorker<T extends TTaskData> {
 
   protected cleanup: QueueWorker<T>["_cleanup"];
   protected async _cleanup() {
+    this.queue.log(
+      LogType.INFO,
+      () => [
+        "Cleaning up tasks for topic:",
+        this.topic,
+      ],
+    );
+
     await this.cleanupCompletedTasks();
     await this.cleanupFailedTasks();
   }
@@ -371,7 +383,7 @@ export class QueueWorker<T extends TTaskData> {
   }
 
   protected async deleteLastTasks(status: QueueTaskStatus, limit: number) {
-    if(limit <= 0) return;
+    if (limit <= 0) return;
 
     const taskIds = await this.queue.listTaskIds(this.topic, {
       status,
@@ -388,7 +400,7 @@ export class QueueWorker<T extends TTaskData> {
     protected topic: string,
     protected handlerOpts: IQueueEventHandlerOptions<T>,
   ) {
-    this.cleanup = throttleCache(this._cleanup.bind(this), 60000); // Throttle to once per minute
+    this.cleanup = throttleCache(this._cleanup.bind(this), 30000); // Throttle to once per half minute
   }
 
   public async run() {

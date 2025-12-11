@@ -577,6 +577,10 @@ export class Queue {
     });
 
     if (typeof payload.delayMs === "number" && payload.delayMs >= 1000) {
+      if (payload.priority) {
+        throw new Error("Cannot set both delayMs and priority for a task");
+      }
+
       const delayedKey = this.resolveKey([
         topic,
         QueueTaskStatus.DELAYED,
@@ -588,6 +592,10 @@ export class Queue {
         id,
       );
     } else if (typeof payload.priority === "number" && payload.priority !== 0) {
+      if (payload.delayMs) {
+        throw new Error("Cannot set both delayMs and priority for a task");
+      }
+
       const delayedKey = this.resolveKey([
         topic,
         QueueTaskStatus.DELAYED,
@@ -794,6 +802,23 @@ export class Queue {
   }
 
   /**
+   * Prepare a queue topic
+   * @param topic
+   * @returns
+   */
+  public static prepare<T extends TTaskData>(topic: string) {
+    return {
+      enqueue: (
+        payload: IQueueTaskPayload<T>,
+      ) => Queue.enqueue<T>(topic, payload),
+      subscribe: (
+        handlerOpts: IQueueEventHandlerOptions<T>,
+      ) => Queue.subscribe<T>(topic, handlerOpts),
+      unsubscribe: () => Queue.unsubscribe(topic),
+    };
+  }
+
+  /**
    * List all task ids from a specific topic
    * @param topic
    * @param opts
@@ -844,6 +869,15 @@ export class Queue {
     status?: QueueTaskStatus,
   ): Promise<number> {
     return await this.redis.zcard(this.resolveKey([topic, status ?? "ids"]));
+  }
+
+  public static async taskExists(
+    topic: string,
+    taskId: string,
+  ): Promise<boolean> {
+    return (!!await this.redis.exists(
+      this.resolveKey([topic, "data", taskId]),
+    ));
   }
 
   /**
@@ -941,23 +975,6 @@ export class Queue {
       progressTimeline?: Array<TTaskProgress>;
       errorTimeline?: Array<TTaskError>;
     })[];
-  }
-
-  /**
-   * Prepare a queue topic
-   * @param topic
-   * @returns
-   */
-  public static prepare<T extends TTaskData>(topic: string) {
-    return {
-      enqueue: (
-        payload: IQueueTaskPayload<T>,
-      ) => Queue.enqueue<T>(topic, payload),
-      subscribe: (
-        handlerOpts: IQueueEventHandlerOptions<T>,
-      ) => Queue.subscribe<T>(topic, handlerOpts),
-      unsubscribe: () => Queue.unsubscribe(topic),
-    };
   }
 
   /**
