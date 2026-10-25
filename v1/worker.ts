@@ -1,4 +1,4 @@
-import { paginated, throttleCache } from "../common/utils.ts";
+import { throttleCache } from "../common/utils.ts";
 import {
   type IQueueEventHandlerOptions,
   LogType,
@@ -40,20 +40,20 @@ export class QueueWorker<T extends TTaskData> {
       this.queue["taskExpiryMs"] / 2,
     );
 
-    const results = await callback();
+    try {
+      return await callback();
+    } finally {
+      clearInterval(beatInterval);
 
-    await this.queue.redis.zrem(heartbeatKey, id);
-
-    clearInterval(beatInterval);
-
-    return results;
+      await this.queue.redis.zrem(heartbeatKey, id);
+    }
   }
 
   protected async withTimeout<T extends unknown>(
     callback: (signal?: AbortSignal) => T,
     timeoutMs?: number,
   ) {
-    let timer: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | undefined;
 
     if (timeoutMs) {
@@ -61,15 +61,15 @@ export class QueueWorker<T extends TTaskData> {
 
       timer = setTimeout(
         () => controller!.abort(),
-        timeoutMs,
+        Number(timeoutMs),
       );
     }
 
-    const results = await callback(controller?.signal);
-
-    clearTimeout(timer);
-
-    return results;
+    try {
+      return await callback(controller?.signal);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   protected async process(
@@ -175,6 +175,10 @@ export class QueueWorker<T extends TTaskData> {
             taskDetails.id,
           );
           endTx.zrem(processingKey, taskDetails.id);
+          endTx.zrem(
+            this.queue.resolveKey([this.topic, QueueTaskStatus.FAILED]),
+            taskDetails.id,
+          ); // May have been marked failed by crash recovery during a long event-loop block
           endTx.hmset(dataKey, {
             results: JSON.stringify(results),
             completedOn: Date.now(),
@@ -228,6 +232,21 @@ export class QueueWorker<T extends TTaskData> {
     });
   }
 
+  protected async hasReadyTasks() {
+    const [waiting, delayed] = await Promise.all([
+      this.queue.redis.zcard(
+        this.queue.resolveKey([this.topic, QueueTaskStatus.WAITING]),
+      ),
+      this.queue.redis.zcount(
+        this.queue.resolveKey([this.topic, QueueTaskStatus.DELAYED]),
+        "-inf",
+        Date.now(),
+      ),
+    ]);
+
+    return waiting + delayed > 0;
+  }
+
   protected async runJobPool(concurrency: number, sort: TSort) {
     const activeSlots: Array<Promise<unknown>> = [];
     const controllers: Array<AbortController> = [];
@@ -274,6 +293,10 @@ export class QueueWorker<T extends TTaskData> {
               const maxLimit = this.handlerOpts.rateLimit.limit;
               const ttl = this.handlerOpts.rateLimit.ttl;
 
+              // Don't spend rate limit budget on empty polls
+              // ponytail: slots racing for the last task can still over-count by up to concurrency - 1
+              if (!await this.hasReadyTasks()) return {};
+
               const limit = await this.queue.redis.rateLimitIncr(
                 rateLimitKey,
                 maxLimit,
@@ -295,6 +318,9 @@ export class QueueWorker<T extends TTaskData> {
 
             if (task && !task[0]) {
               await this.process(index, task[1]);
+
+              // Keep draining the backlog without waiting for the next tick
+              return { sleep: 0 };
             }
 
             return {};
@@ -392,18 +418,20 @@ export class QueueWorker<T extends TTaskData> {
   protected async deleteLastTasks(status: QueueTaskStatus, limit: number) {
     if (limit <= 0) return;
 
-    await paginated(Math.min(limit, 500), async (offset, batchLimit) => {
+    // Always read from offset 0, deleting shifts the remaining items forward
+    while (limit > 0) {
       const taskIds = await this.queue.listTaskIds(this.topic, {
         status,
         sort: 1,
-        offset,
-        limit: batchLimit,
+        limit: Math.min(limit, 500),
       });
+
+      if (!taskIds.length) break;
 
       await this.queue.delete(this.topic, ...taskIds);
 
-      return (offset + batchLimit) < limit ? taskIds.length : 0;
-    });
+      limit -= taskIds.length;
+    }
   }
 
   constructor(

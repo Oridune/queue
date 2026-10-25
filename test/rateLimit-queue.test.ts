@@ -30,7 +30,7 @@ Deno.test({
       concurrency: 4,
       rateLimit: {
         limit: 3,
-        ttl: 10,
+        ttl: 20, // Must outlast the 12s wait below, or a second window opens
       },
     });
 

@@ -41,7 +41,8 @@ export class Ticker {
       immediate?: boolean;
     },
   ) {
-    this.stop();
+    // Don't call stop() here, it resets count on every tick
+    if (this.timeoutId !== null) clearTimeout(this.timeoutId);
 
     const executeAndSchedule = async () => {
       if (this.paused) {
@@ -79,8 +80,7 @@ export class Ticker {
       executeAndSchedule();
     } else {
       const baseDelay = opts?.delayMs ?? this.delayMs;
-      const extraSleep = opts?.sleep ?? 0;
-      const delayMs = extraSleep || baseDelay;
+      const delayMs = opts?.sleep ?? baseDelay; // sleep: 0 means tick again immediately
 
       this.timeoutId = setTimeout(executeAndSchedule, delayMs);
     }

@@ -101,4 +101,9 @@ for i = 1, #waitingIds, 2 do
     table.insert(movedIds, waitingIds[i])
 end
 
+-- Start the heartbeat atomically so a worker crash before its first beat is still recoverable
+for _, id in ipairs(movedIds) do
+    redis.call('ZADD', namespace .. ":" .. "heartbeat", timestamp, id)
+end
+
 return movedIds

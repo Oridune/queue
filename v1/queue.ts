@@ -490,10 +490,15 @@ export class Queue {
       pl.hgetall(this.resolveKey([topic, "data", id]));
     });
 
-    return await pl.exec() as [
+    const results = await pl.exec() as [
       Error | null,
       TQueueTaskDetails,
     ][];
+
+    // Tasks enqueued by older versions may not have an id field stored
+    results.forEach(([, task], i) => task && (task.id ??= movedTaskIds[i]));
+
+    return results;
   }
 
   /**
@@ -504,6 +509,9 @@ export class Queue {
     if (this.ready) {
       throw new Error("Queue is already initialized!");
     }
+
+    // Reset so a restart doesn't append the namespace twice
+    this.namespace = ["OriduneQueue"];
 
     // Customize options
     if (typeof opts === "object") {
@@ -589,8 +597,11 @@ export class Queue {
 
     tx.zadd(idsKey, now, id);
 
+    const { validate: _, ...details } = payload;
+
     tx.hmset(dataKey, {
-      ...payload,
+      ...details,
+      id,
       attempt: 0,
       retryCount: payload.retryCount ?? 3,
       data: stringifiedData,
@@ -1095,10 +1106,24 @@ export class Queue {
 
     return (await Promise.all(taskIds.map(async (taskId) => {
       const dataKey = this.resolveKey([topic, "data", taskId]);
+      const progressKey = this.resolveKey("progress", dataKey);
+      const errorKey = this.resolveKey("error", dataKey);
+
+      // Delete sub keys directly instead of a keyspace SCAN per task
+      const [progressIds, errorIds] = await Promise.all([
+        this.redis.lrange(progressKey, 0, -1),
+        this.redis.lrange(errorKey, 0, -1),
+      ]);
 
       const tx = this.redis.multi();
 
       tx.del(dataKey);
+      tx.del(
+        progressKey,
+        errorKey,
+        ...progressIds.map((uuid) => this.resolveKey(uuid, progressKey)),
+        ...errorIds.map((uuid) => this.resolveKey(uuid, errorKey)),
+      );
       tx.zrem(idsKey, taskId);
       tx.zrem(delayedKey, taskId);
       tx.zrem(waitingKey, taskId);
@@ -1107,10 +1132,6 @@ export class Queue {
       tx.zrem(failedKey, taskId);
 
       const results = await tx.exec();
-
-      await this.redis.deleteKeysWithPattern(
-        this.resolveKey("*", dataKey),
-      );
 
       return (results?.[0][1] ?? 0) as number;
     }))).reduce((_, num) => _ + num, 0);
